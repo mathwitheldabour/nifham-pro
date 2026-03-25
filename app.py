@@ -8,116 +8,140 @@ st.set_page_config(page_title="NIFHAM Math | منصة نفهم", layout="centere
 # --- تنسيق احترافي ---
 st.markdown("""
     <style>
-    .main { background-color: #f9f9f9; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #007bff; color: white; }
+    .main { background-color: #f4f7f6; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; height: 3em; }
     .arabic-text { direction: rtl; text-align: right; color: #555; font-size: 0.9em; }
-    .exam-box { padding: 15px; border-radius: 10px; border: 1px solid #ddd; background: white; margin-bottom: 10px; }
+    .user-tag { background-color: #e1f5fe; padding: 5px 15px; border-radius: 15px; color: #0288d1; font-weight: bold; }
+    .exam-box { padding: 15px; border-radius: 10px; border: 1px solid #ddd; background: white; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     </style>
     """, unsafe_allow_html=True)
 
-# --- دالة قراءة البيانات (الطريقة المباشرة والأضمن) ---
+# --- دالة قراءة البيانات المباشرة ---
 def get_data_from_google(sheet_name):
-    # ده الـ ID بتاع ملفك اللي بعتهولي
     SHEET_ID = "18z5rEvxgPy2wZxqbnZ4fU7yp_rQ8qD9BpJy4BjWAdJY"
-    # رابط تحويل الشيت لـ CSV مباشر
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
     try:
         df = pd.read_csv(url)
-        # تنظيف الداتا من أي مسافات أو قيم فارغة
-        df.columns = [c.strip() for c in df.columns]
+        df.columns = [c.strip() for c in df.columns] # تنظيف أسماء الأعمدة
         return df
     except Exception as e:
-        st.error(f"Connection Error: {e} / مشكلة في الاتصال")
         return pd.DataFrame()
 
-# --- إدارة حالة المستخدم ---
+# --- إدارة الحالة ---
 if 'auth' not in st.session_state:
-    st.session_state.auth = False
-    st.session_state.user = None
-    st.session_state.exam = None
+    st.session_state.update({'auth': False, 'user': None, 'role': None, 'exam': None})
 
-# --- 1. شاشة الدخول ---
+# --- 1. شاشة الدخول الموحدة ---
 if not st.session_state.auth:
-    st.title("Student Login")
-    st.markdown('<p class="arabic-text">تسجيل دخول الطالب</p>', unsafe_allow_html=True)
+    st.title("NIFHAM Math Platform")
+    st.markdown('<p class="arabic-text">مرحباً بك في منصة نفهم للرياضيات</p>', unsafe_allow_html=True)
     
-    with st.form("login"):
-        sid = st.text_input("ID / رقم الطالب").strip()
-        spass = st.text_input("Password / كلمة المرور", type="password").strip()
+    # اختيار نوع المستخدم
+    role_choice = st.radio("Login as / الدخول كـ:", ["Student / طالب", "Teacher / معلم"], horizontal=True)
+    
+    with st.form("login_form"):
+        u_id = st.text_input("ID / رقم المستخدم").strip()
+        u_pass = st.text_input("Password / كلمة المرور", type="password").strip()
+        submit = st.form_submit_button("Sign In / دخول")
         
-        if st.form_submit_button("Sign In / دخول"):
-            df_students = get_data_from_google("Students")
-            if not df_students.empty:
-                # التأكد من تحويل الأعمدة لنصوص للمقارنة الدقيقة
-                df_students['ID'] = df_students['ID'].astype(str).str.strip()
-                df_students['Password'] = df_students['Password'].astype(str).str.strip()
+        if submit:
+            # تحديد الشيت المطلوب بناءً على الاختيار
+            sheet_target = "Students" if "Student" in role_choice else "Users"
+            df_users = get_data_from_google(sheet_target)
+            
+            if not df_users.empty:
+                # تحويل البيانات لنصوص للمطابقة
+                df_users['ID'] = df_users['ID'].astype(str).str.strip()
+                df_users['Password'] = df_users['Password'].astype(str).str.strip()
                 
-                user = df_students[(df_students['ID'] == sid) & (df_students['Password'] == spass)]
+                match = df_users[(df_users['ID'] == u_id) & (df_users['Password'] == u_pass)]
                 
-                if not user.empty:
+                if not match.empty:
                     st.session_state.auth = True
-                    st.session_state.user = user.iloc[0].to_dict()
-                    st.success("Welcome! / تم الدخول")
+                    st.session_state.user = match.iloc[0].to_dict()
+                    st.session_state.role = "Student" if "Student" in role_choice else "Teacher"
+                    st.success(f"Welcome {st.session_state.user['Name']}!")
                     time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("Invalid Login / خطأ في البيانات")
+                    st.error("Invalid ID or Password / خطأ في رقم المستخدم أو كلمة المرور")
             else:
-                st.error("Check Sheet names! / تأكد من أسماء التبويبات في الشيت")
+                st.error(f"Sheet '{sheet_target}' not found! / تأكد من وجود الشيت بالاسم الصحيح")
 
-# --- 2. لوحة الامتحانات (بتظهر بعد الدخول) ---
-elif st.session_state.auth and st.session_state.exam is None:
+# --- 2. لوحة التحكم ---
+else:
     u = st.session_state.user
-    st.title(f"Hello, {u['Name']}")
-    st.markdown(f'<p class="arabic-text">أهلاً بك يا {u["Name"]} (شعبة {u["Section"]})</p>', unsafe_allow_html=True)
+    role = st.session_state.role
     
+    # الشريط الجانبي
+    st.sidebar.markdown(f'<div class="user-tag">{role}</div>', unsafe_allow_html=True)
+    st.sidebar.title(f"Hi, {u['Name']}")
     if st.sidebar.button("Logout / خروج"):
-        st.session_state.auth = False
+        st.session_state.update({'auth': False, 'user': None, 'role': None, 'exam': None})
         st.rerun()
 
-    st.subheader("Available Exams")
-    df_exams = get_data_from_google("Exams")
-    
-    if not df_exams.empty:
-        # تصفية الامتحانات حسب الشعبة والحالة
-        my_exams = df_exams[
-            (df_exams['Status'] == 'Active') & 
-            ((df_exams['Section'].astype(str) == str(u['Section'])) | (df_exams['Section'] == 'All'))
-        ]
+    # --- واجهة المعلم (Teacher Dashboard) ---
+    if role == "Teacher":
+        st.title("Teacher Dashboard")
+        st.markdown('<p class="arabic-text">لوحة تحكم المعلم</p>', unsafe_allow_html=True)
         
-        if my_exams.empty:
-            st.info("No exams active / لا توجد امتحانات مفعلة")
-        else:
-            for _, row in my_exams.iterrows():
-                with st.container():
-                    st.markdown(f"""<div class="exam-box">
-                        <strong>{row['Title']}</strong><br>Lesson: {row['Lesson']} | Duration: {row['Duration']} min
-                    </div>""", unsafe_allow_html=True)
-                    if st.button("Start / ابدأ", key=row['Exam_ID']):
-                        st.session_state.exam = row.to_dict()
-                        st.session_state.start_t = time.time()
-                        st.rerun()
+        tab1, tab2 = st.tabs(["Exams Management / إدارة الامتحانات", "Student Grades / درجات الطلاب"])
+        
+        with tab1:
+            st.write("Current Exams in Google Sheet:")
+            df_exams = get_data_from_google("Exams")
+            if not df_exams.empty:
+                st.dataframe(df_exams[['Exam_ID', 'Title', 'Section', 'Status']])
+            else:
+                st.warning("No exams found in 'Exams' sheet.")
+        
+        with tab2:
+            st.write("Viewing Grades (from 'Grades' sheet):")
+            df_grades = get_data_from_google("Grades")
+            if not df_grades.empty:
+                st.dataframe(df_grades)
+            else:
+                st.info("No grades recorded yet.")
 
-# --- 3. مشغل الامتحان ---
-else:
-    exam = st.session_state.exam
-    st.title(exam['Title'])
-    
-    # حساب الوقت
-    rem = (int(exam['Duration']) * 60) - int(time.time() - st.session_state.start_t)
-    
-    if rem <= 0:
-        st.error("Time finished! / انتهى الوقت")
-        if st.button("Back / عودة"):
-            st.session_state.exam = None
-            st.rerun()
+    # --- واجهة الطالب (Student Dashboard) ---
     else:
-        m, s = divmod(rem, 60)
-        st.metric("Time Remaining / الوقت المتبقي", f"{m:02d}:{s:02d}")
-        st.components.v1.html(exam['HTML_Code'], height=700, scrolling=True)
-        
-        if st.button("Submit / تسليم"):
-            st.success("Submitted! / تم التسليم")
-            time.sleep(2)
-            st.session_state.exam = None
-            st.rerun()
+        if st.session_state.exam is None:
+            st.title("My Exams")
+            st.markdown(f'<p class="arabic-text">امتحانات {u["Section"]}</p>', unsafe_allow_html=True)
+            
+            df_exams = get_data_from_google("Exams")
+            if not df_exams.empty:
+                # تصفية حسب الشعبة
+                my_exams = df_exams[
+                    (df_exams['Status'] == 'Active') & 
+                    ((df_exams['Section'].astype(str) == str(u['Section'])) | (df_exams['Section'] == 'All'))
+                ]
+                
+                if my_exams.empty:
+                    st.info("No active exams / لا توجد امتحانات مفعلة حالياً")
+                else:
+                    for _, row in my_exams.iterrows():
+                        with st.container():
+                            st.markdown(f"""<div class="exam-box">
+                                <strong>{row['Title']}</strong><br>Lesson: {row['Lesson']} | Duration: {row['Duration']} min
+                            </div>""", unsafe_allow_html=True)
+                            if st.button("Start / ابدأ", key=f"ex_{row['Exam_ID']}"):
+                                st.session_state.exam = row.to_dict()
+                                st.session_state.start_t = time.time()
+                                st.rerun()
+        else:
+            # مشغل الامتحان (كما في الكود السابق)
+            exam = st.session_state.exam
+            st.title(exam['Title'])
+            rem = (int(exam['Duration']) * 60) - int(time.time() - st.session_state.start_t)
+            
+            if rem <= 0:
+                st.error("Time finished!")
+                if st.button("Back"): st.session_state.exam = None; st.rerun()
+            else:
+                m, s = divmod(rem, 60)
+                st.metric("Time Remaining", f"{m:02d}:{s:02d}")
+                st.components.v1.html(exam['HTML_Code'], height=700, scrolling=True)
+                if st.button("Submit"):
+                    st.success("Submitted successfully!"); time.sleep(2)
+                    st.session_state.exam = None; st.rerun()
