@@ -1,308 +1,145 @@
 import streamlit as st
-import random
-import time
-from datetime import datetime, timedelta
+import pandas as pd
+from streamlit_gsheets import GSheetsConnection
+import plotly.express as px
+import plotly.graph_objects as go
 
-# -----------------------------------------------------------------------------
-# 1. إعداد الصفحة وتجهيز الحالة
-# -----------------------------------------------------------------------------
-st.set_page_config(page_title="Math Quiz - Calculus", layout="wide")
+# --- 1. SETTINGS & STYLING | الإعدادات والتنسيق ---
+st.set_page_config(page_title="NIFHAM Math PRO", layout="wide")
 
-# تهيئة المتغيرات
-if 'initialized' not in st.session_state:
-    st.session_state['initialized'] = True
-    st.session_state['current_q_index'] = 0
-    st.session_state['answers'] = {} 
-    st.session_state['quiz_submitted'] = False
-    st.session_state['start_time'] = datetime.now()
-    
-    # --- بنك الأسئلة ---
-    raw_questions = [
-        {
-            "type": "Polynomial",
-            "latex": r"f(x) = x^3 - 3x^2 + 5",
-            "q_en": "Determine the intervals where the graph is concave upward.",
-            "q_ar": "حدد الفترات التي يكون فيها منحنى الدالة مقعراً لأعلى.",
-            "options": [
-                r"(1, \infty)", 
-                r"(-\infty, 1)", 
-                r"(-\infty, \infty)", 
-                r"(0, 2)"
-            ],
-            "correct_option": r"(1, \infty)"
-        },
-        {
-            "type": "Rational",
-            "latex": r"f(x) = \frac{1}{x^2 + 1}",
-            "q_en": "Find the x-coordinates of the inflection points.",
-            "q_ar": "أوجد الإحداثيات السينية لنقاط الانقلاب.",
-            "options": [
-                r"x = \pm \frac{1}{\sqrt{3}}", 
-                r"x = \pm 1", 
-                r"x = 0", 
-                r"\text{No inflection points}"
-            ],
-            "correct_option": r"x = \pm \frac{1}{\sqrt{3}}"
-        },
-        {
-            "type": "Exponential",
-            "latex": r"f(x) = x e^x",
-            "q_en": "Determine the interval where the function is concave downward.",
-            "q_ar": "حدد الفترة التي تكون فيها الدالة مقعرة لأسفل.",
-            "options": [
-                r"(-\infty, -2)", 
-                r"(-2, \infty)", 
-                r"(-1, \infty)", 
-                r"(-\infty, 0)"
-            ],
-            "correct_option": r"(-\infty, -2)"
-        },
-        {
-            "type": "Radical",
-            "latex": r"f(x) = \sqrt[3]{x} - 1",
-            "q_en": "Identify the inflection point.",
-            "q_ar": "حدد نقطة الانقلاب.",
-            "options": [
-                r"(0, -1)", 
-                r"(1, 0)", 
-                r"(0, 0)", 
-                r"\text{Undefined}"
-            ],
-            "correct_option": r"(0, -1)"
-        },
-        {
-            "type": "Polynomial",
-            "latex": r"f(x) = x^4 - 4x^3",
-            "q_en": "Find the intervals of downward concavity.",
-            "q_ar": "أوجد فترات التقعر لأسفل.",
-            "options": [
-                r"(0, 2)", 
-                r"(-\infty, 0) \cup (2, \infty)", 
-                r"(2, \infty)", 
-                r"(-\infty, 2)"
-            ],
-            "correct_option": r"(0, 2)"
-        }
-    ]
-    
-    random.shuffle(raw_questions)
-    
-    processed_questions = []
-    for q in raw_questions:
-        opts = q['options'].copy()
-        random.shuffle(opts)
-        processed_questions.append({
-            "latex": q['latex'],
-            "q_en": q['q_en'],
-            "q_ar": q['q_ar'],
-            "options": opts,
-            "correct_val": q['correct_option']
-        })
-    
-    st.session_state['questions'] = processed_questions
-
-questions = st.session_state['questions']
-total_q = len(questions)
-
-# -----------------------------------------------------------------------------
-# 2. CSS Styles
-# -----------------------------------------------------------------------------
+# Custom CSS for Prestige Look
 st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
-    html, body, [class*="css"] {
-        font-family: 'Cairo', sans-serif;
-    }
-    .bilingual-header {
-        display: flex;
-        justify_content: space-between;
-        align-items: center;
-        background-color: #f0f2f6;
-        padding: 15px;
-        border-radius: 10px;
-        border-left: 5px solid #ff4b4b;
-        margin-bottom: 20px;
-    }
-    .text-left { text-align: left; width: 48%; direction: ltr; font-weight: bold; }
-    .text-right { text-align: right; width: 48%; direction: rtl; font-weight: bold; }
-    
-    .math-box {
-        text-align: center;
-        padding: 15px;
-        margin: 10px 0;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        background-color: #fff;
-    }
-    
-    .floating-timer {
-        position: fixed; top: 60px; right: 20px;
-        background-color: #ff4b4b; color: white;
-        padding: 8px 16px; border-radius: 20px;
-        font-weight: bold; z-index: 9999;
-    }
-    
-    /* تنسيق خاص لبطاقات الاختيار */
-    div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        border-radius: 10px;
-        transition: transform 0.2s;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# -----------------------------------------------------------------------------
-# 3. Timer Logic
-# -----------------------------------------------------------------------------
-QUIZ_DURATION = 10 * 60 
-
-def get_time_remaining():
-    elapsed = (datetime.now() - st.session_state['start_time']).total_seconds()
-    remaining = QUIZ_DURATION - elapsed
-    return max(0, int(remaining))
-
-time_left = get_time_remaining()
-mins, secs = divmod(time_left, 60)
-timer_display = f"{mins:02d}:{secs:02d}"
-
-st.markdown(f'<div class="floating-timer">⏱ {timer_display}</div>', unsafe_allow_html=True)
-
-if time_left == 0 and not st.session_state['quiz_submitted']:
-    st.warning("انتهى الوقت!")
-    st.session_state['quiz_submitted'] = True
-    st.rerun()
-
-# -----------------------------------------------------------------------------
-# 4. Main App Logic
-# -----------------------------------------------------------------------------
-st.title("📝 Calculus Quiz: Concavity & Inflection Points")
-st.markdown("---")
-
-# Navigation Functions
-def go_to_question(index):
-    st.session_state['current_q_index'] = index
-
-def select_option(q_idx, option_val):
-    st.session_state['answers'][q_idx] = option_val
-
-def submit_quiz():
-    st.session_state['quiz_submitted'] = True
-
-# Navigation Bar
-if not st.session_state['quiz_submitted']:
-    st.write("**Navigation / تصفح الأسئلة:**")
-    cols = st.columns(total_q)
-    for i in range(total_q):
-        label = f"Q{i+1}"
-        if i in st.session_state['answers']:
-            label += " ✅"
-        
-        # Highlight current question
-        type_ = "primary" if i == st.session_state['current_q_index'] else "secondary"
-        if cols[i].button(label, key=f"nav_{i}", type=type_, use_container_width=True):
-            go_to_question(i)
-            st.rerun()
-    st.markdown("---")
-
-# -----------------------------------------------------------------------------
-# 5. Question Display (The Fix)
-# -----------------------------------------------------------------------------
-
-if st.session_state['quiz_submitted']:
-    # --- Results View ---
-    st.header("النتائج النهائية | Final Results")
-    
-    score = 0
-    for i, q in enumerate(questions):
-        user_ans = st.session_state['answers'].get(i, None)
-        correct_ans = q['correct_val']
-        is_correct = (user_ans == correct_ans)
-        if is_correct: score += 1
-            
-        st.markdown(f"### Question {i+1}")
-        st.latex(q['latex'])
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.info("Your Answer:")
-            if user_ans: st.latex(user_ans)
-            else: st.write("No Answer")
-        with c2:
-            if is_correct: st.success("Correct Answer:")
-            else: st.error("Correct Answer:")
-            st.latex(correct_ans)
-        st.divider()
-    
-    pct = (score / total_q) * 100
-    st.metric("Final Score", f"{pct}%", f"{score}/{total_q}")
-    
-    if st.button("Start New Quiz"):
-        for k in list(st.session_state.keys()): del st.session_state[k]
-        st.rerun()
-
-else:
-    # --- Current Question View ---
-    curr_idx = st.session_state['current_q_index']
-    curr_q = questions[curr_idx]
-    
-    # 1. Header
-    st.markdown(f"""
-    <div class="bilingual-header">
-        <div class="text-left">Q{curr_idx+1}: {curr_q['q_en']}</div>
-        <div class="text-right">{curr_q['q_ar']}</div>
-    </div>
+    <style>
+    .main { background-color: #f8fafc; }
+    .stButton>button { background-color: #0f172a; color: white; border-radius: 12px; height: 3em; width: 100%; font-weight: bold; transition: 0.3s; }
+    .stButton>button:hover { background-color: #10b981; border: none; }
+    .ar-text { font-family: 'Cairo', sans-serif; text-align: right; direction: rtl; color: #475569; }
+    .en-main { font-weight: 800; color: #0f172a; font-size: 1.5rem; }
+    .card { background-color: white; padding: 20px; border-radius: 15px; border-left: 5px solid #10b981; margin-bottom: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    </style>
     """, unsafe_allow_html=True)
-    
-    # 2. Equation
-    st.markdown('<div class="math-box">', unsafe_allow_html=True)
-    st.latex(curr_q['latex'])
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # 3. Options (Using Card Layout for MathJax Support)
-    st.write("### اختر الإجابة الصحيحة | Select the correct answer:")
-    
-    # نستخدم شبكة 2x2
-    col1, col2 = st.columns(2)
-    opt_cols = [col1, col2] # للتبديل بين العمودين
-    
-    current_selection = st.session_state['answers'].get(curr_idx)
-    
-    for idx, option in enumerate(curr_q['options']):
-        # تحديد العمود (يسار ثم يمين)
-        with opt_cols[idx % 2]:
-            # هل هذا الخيار هو المختار حالياً؟
-            is_selected = (current_selection == option)
-            
-            # نستخدم Container لعمل إطار حول الخيار
-            # إذا كان مختاراً، نستخدم حدوداً مميزة (سنحاكي ذلك بلون الزر)
-            border_color = "red" if is_selected else "grey"
-            
-            with st.container(border=True):
-                # 1. عرض المعادلة بشكل نظيف جداً باستخدام st.latex
-                st.latex(option)
-                
-                # 2. زر الاختيار أسفل المعادلة
-                btn_label = "✅ تم الاختيار" if is_selected else "اختيار | Select"
-                btn_type = "primary" if is_selected else "secondary"
-                
-                # مفتاح فريد لكل زر
-                if st.button(btn_label, key=f"q{curr_idx}_opt{idx}", type=btn_type, use_container_width=True):
-                    select_option(curr_idx, option)
-                    st.rerun()
 
-    st.markdown("<br>", unsafe_allow_html=True)
+# --- 2. DATABASE CONNECTION | الاتصال بالقاعدة ---
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+def load_sheet(name):
+    return conn.read(worksheet=name, ttl=0) # ttl=0 لضمان تحديث البيانات لحظياً
+
+# --- 3. AUTHENTICATION | نظام الدخول ---
+if 'role' not in st.session_state:
+    st.session_state.role = None
+    st.session_state.user = None
+
+if st.session_state.role is None:
+    st.markdown("<h1 style='text-align: center; color: #0f172a;'>NIFHAM Math PRO</h1>", unsafe_allow_html=True)
+    st.markdown("<p class='ar-text' style='text-align: center;'>منصة نفهم للرياضيات المتقدمة - مستر إبراهيم الدبور</p>", unsafe_allow_html=True)
     
-    # Footer Navigation
-    c1, c2, c3 = st.columns([1, 2, 1])
-    if curr_idx > 0:
-        if c1.button("⬅️ Previous", use_container_width=True):
-            go_to_question(curr_idx - 1)
-            st.rerun()
-    if curr_idx < total_q - 1:
-        if c3.button("Next ➡️", use_container_width=True):
-            go_to_question(curr_idx + 1)
-            st.rerun()
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        with st.form("login_form"):
+            uid = st.text_input("User ID | كود المستخدم")
+            upass = st.text_input("Password | كلمة المرور", type="password")
+            submit = st.form_submit_button("Login | دخول")
             
-    st.markdown("---")
-    if st.button("Submit Quiz | إنهاء الاختبار", type="primary", use_container_width=True):
-        submit_quiz()
+            if submit:
+                # Check Students
+                df_s = load_sheet("Students")
+                user = df_s[(df_s['ID'].astype(str) == uid) & (df_s['Password'].astype(str) == upass)]
+                
+                if not user.empty:
+                    st.session_state.role = 'student'
+                    st.session_state.user = user.iloc[0]
+                    st.rerun()
+                
+                # Check Teachers/Admin in Users sheet
+                df_u = load_sheet("Users")
+                admin = df_u[(df_u['ID'].astype(str) == uid) & (df_u['Password'].astype(str) == upass)]
+                if not admin.empty:
+                    st.session_state.role = admin.iloc[0]['Role']
+                    st.session_state.user = admin.iloc[0]
+                    st.rerun()
+                
+                st.error("Invalid Credentials | بيانات غير صحيحة")
+
+# --- 4. TEACHER DASHBOARD | لوحة تحكم المعلم ---
+elif st.session_state.role == 'teacher':
+    st.sidebar.title("Teacher Control Panel")
+    st.sidebar.markdown("---")
+    menu = st.sidebar.radio("Navigation", ["Analytics Dashboard", "Manage Exams", "Lessons & Content"])
+    
+    if st.sidebar.button("Logout | خروج"):
+        st.session_state.role = None
         st.rerun()
+
+    if menu == "Analytics Dashboard":
+        st.title("Performance Analytics | تحليلات الأداء")
+        
+        # Load Grades for Charts
+        df_grades = load_sheet("Grades")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            # Chart 1: Average score per exam
+            avg_scores = df_grades.groupby('EID')['Score'].mean().reset_index()
+            fig = px.bar(avg_scores, x='EID', y='Score', title="Average Score Per Exam", color_discrete_sequence=['#10b981'])
+            st.plotly_chart(fig, use_container_width=True)
+            
+        with col2:
+            # Chart 2: Success rate
+            fig2 = px.pie(df_grades, names='Score', title="Score Distribution", hole=0.4, color_discrete_sequence=px.colors.sequential.Tealgrn)
+            st.plotly_chart(fig2, use_container_width=True)
+
+    elif menu == "Manage Exams":
+        st.title("Manage Exams | إدارة الاختبارات")
+        df_exams = load_sheet("Exams")
+        st.write("Control answer visibility and exam status:")
+        st.data_editor(df_exams) # يسمح لك بالتعديل المباشر وحفظ التغييرات لاحقاً
+        st.info("Tip: Set 'Show_Answers' to TRUE when you want students to see their results.")
+
+# --- 5. STUDENT DASHBOARD | لوحة الطالب ---
+elif st.session_state.role == 'student':
+    user = st.session_state.user
+    st.sidebar.title(f"Welcome, {user['Name']}")
+    st.sidebar.info(f"Section: {user['Section']}")
+    
+    if st.sidebar.button("Logout | خروج"):
+        st.session_state.role = None
+        st.rerun()
+
+    tab1, tab2, tab3 = st.tabs(["Learning Path | دروسي", "Assessments | التقييمات", "Progress Report | تقريري"])
+
+    with tab1:
+        st.markdown("### My Lessons | الدروس المنهجية")
+        df_lessons = load_sheet("Lessons")
+        for idx, row in df_lessons.iterrows():
+            with st.expander(f"Lesson: {row['Title']}"):
+                st.write(row['Content'])
+                if pd.notna(row['Video_Link']):
+                    st.video(row['Video_Link'])
+
+    with tab2:
+        st.markdown("### Active Assessments | الاختبارات المتاحة")
+        df_exams = load_sheet("Exams")
+        active_exams = df_exams[df_exams['Status'] == 'Active']
+        
+        for idx, row in active_exams.iterrows():
+            st.markdown(f"""<div class='card'><b>{row['Title']}</b><br><small>Related to Lesson ID: {row['Lesson_ID']}</small></div>""", unsafe_allow_html=True)
+            if st.button(f"Enter Exam: {row['Title']}", key=row['Exam_ID']):
+                st.session_state.current_exam = row['Exam_ID']
+                st.info("Exam UI would load here...")
+
+    with tab3:
+        st.markdown("### My Progress & Archive | أرشيف الأداء")
+        df_grades = load_sheet("Grades")
+        my_grades = df_grades[df_grades['SID'].astype(str) == str(user['ID'])]
+        
+        df_exams = load_sheet("Exams")
+        
+        for idx, row in my_grades.iterrows():
+            exam_info = df_exams[df_exams['Exam_ID'] == row['EID']].iloc[0]
+            with st.expander(f"{exam_info['Title']} - Score: {row['Score']}%"):
+                if exam_info['Show_Answers'] == "TRUE":
+                    st.success("Review is Available | مراجعة الإجابات متاحة")
+                    st.json(row['Analytics']) # هنا نعرض تفاصيل الإجابات
+                else:
+                    st.warning("Answers are hidden by teacher | الإجابات مخفية من قِبل المعلم")
