@@ -1,5 +1,4 @@
 streamlit
-sympy
-matplotlib
-numpy
-fpdf
+pandas
+streamlit-gsheets
+plotly
