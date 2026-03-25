@@ -1,188 +1,184 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from datetime import datetime
 
-# --- 1. إعدادات المنصة والتنسيق الجمالي ---
-st.set_page_config(page_title="NIFHAM Math PRO", layout="wide", initial_sidebar_state="expanded")
+# --- 1. إعدادات الصفحة والتنسيق الاحترافي ---
+st.set_page_config(page_title="NIFHAM Math PRO", layout="wide")
 
-# تصميم مخصص للألوان (Midnight Blue & Emerald)
+# CSS لتعديل القائمة الجانبية ودعم الطباعة
 st.markdown("""
     <style>
-    .stApp { background-color: #f8fafc; }
-    [data-testid="stSidebar"] { background-color: #0f172a; color: white; }
-    .stButton>button { background-color: #0f172a; color: white; border-radius: 10px; width: 100%; font-weight: bold; }
-    .stButton>button:hover { background-color: #10b981; color: white; border: none; }
-    .ar-text { font-family: 'Cairo', sans-serif; text-align: right; direction: rtl; }
-    .card { background: white; padding: 20px; border-radius: 15px; border-left: 5px solid #10b981; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 10px; }
-    .status-wanted { color: #f59e0b; font-weight: bold; border: 1px solid #f59e0b; padding: 2px 8px; border-radius: 5px; }
-    .status-done { color: #10b981; font-weight: bold; border: 1px solid #10b981; padding: 2px 8px; border-radius: 5px; }
+    /* تعديل القائمة الجانبية لتكون فاتحة والخط واضح */
+    [data-testid="stSidebar"] {
+        background-color: #f1f5f9 !important;
+        border-right: 1px solid #e2e8f0;
+    }
+    [data-testid="stSidebar"] * {
+        color: #0f172a !important; /* لون الخط داكن جداً */
+        font-weight: 500;
+    }
+    .stButton>button { border-radius: 8px; font-weight: bold; }
+    
+    /* تنسيق الطباعة */
+    @media print {
+        .no-print { display: none !important; }
+        [data-testid="stSidebar"] { display: none !important; }
+        .main { width: 100% !important; }
+    }
+    
+    .status-wanted { background-color: #fef3c7; color: #92400e; padding: 4px 8px; border-radius: 6px; font-weight: bold; }
+    .status-done { background-color: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 6px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. محرك جلب البيانات من Google Sheets ---
-# تأكد من وضع SHEET_ID في Secrets الموقع
-if "SHEET_ID" not in st.secrets:
-    st.error("الرجاء ضبط SHEET_ID في إعدادات Secrets.")
-    st.stop()
-
-SHEET_ID = st.secrets["SHEET_ID"]
+# --- 2. محرك البيانات ---
+SHEET_ID = st.secrets.get("SHEET_ID", "18z5rEvxgPy2wZxqbnZ4fU7yp_rQ8qD9BpJy4BjWAdJY")
 
 def load_data(sheet_name):
-    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-    # قراءة البيانات كنصوص لتجنب مشاكل الأرقام
-    return pd.read_csv(url, dtype=str).fillna("")
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+        df = pd.read_csv(url, dtype=str).fillna("")
+        return df
+    except:
+        return pd.DataFrame()
 
-# --- 3. إدارة جلسة المستخدم ---
+# --- 3. إدارة الجلسة (Login Fix) ---
 if 'role' not in st.session_state:
     st.session_state.role = None
+if 'user' not in st.session_state:
     st.session_state.user = None
 
-# --- 4. بوابة تسجيل الدخول (الدخول الموحد) ---
-if st.session_state.role is None:
-    st.markdown("<h1 style='text-align: center; color: #0f172a;'>NIFHAM Math PRO</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #64748b;'>Welcome to the Advanced Learning Portal</p>", unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1,2,1])
+# --- 4. واجهة تسجيل الدخول (Instant Login) ---
+if not st.session_state.role:
+    st.markdown("<h1 style='text-align: center;'>NIFHAM Math PRO</h1>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1,1.5,1])
     with col2:
-        with st.form("login_form"):
-            st.info("Login | تسجيل الدخول")
-            uid = st.text_input("User ID | الكود").strip()
-            upass = st.text_input("Password | كلمة المرور", type="password").strip()
-            submit = st.form_submit_button("Enter | دخول")
+        with st.container(border=True):
+            st.markdown("<h4 style='text-align: center;'>تسجيل الدخول</h4>", unsafe_allow_html=True)
+            uid = st.text_input("كود المستخدم").strip()
+            upass = st.text_input("كلمة المرور", type="password").strip()
             
-            if submit:
-                # محاولة البحث في شيت المعلمين
-                try:
-                    df_u = load_data("Users")
-                    admin = df_u[(df_u['ID'] == uid) & (df_u['Password'] == upass)]
-                    if not admin.empty:
-                        st.session_state.role = str(admin.iloc[0]['Roll']).lower().strip()
-                        st.session_state.user = admin.iloc[0]
+            if st.button("دخول الممنصة", use_container_width=True):
+                # فحص المعلمين
+                df_u = load_data("Users")
+                if not df_u.empty and 'ID' in df_u.columns:
+                    match = df_u[(df_u['ID'] == uid) & (df_u['Password'] == upass)]
+                    if not match.empty:
+                        st.session_state.role = 'teacher'
+                        st.session_state.user = match.iloc[0]
                         st.rerun()
-                except: pass
 
-                # محاولة البحث في شيت الطلاب
-                try:
-                    df_s = load_data("Students")
-                    user = df_s[(df_s['ID'] == uid) & (df_s['Password'] == upass)]
-                    if not user.empty:
-                        # إذا لم يوجد عمود Roll نعتبره طالب
-                        st.session_state.role = str(user.iloc[0].get('Roll', 'student')).lower().strip()
-                        st.session_state.user = user.iloc[0]
+                # فحص الطلاب
+                df_s = load_data("Students")
+                if not df_s.empty and 'ID' in df_s.columns:
+                    match = df_s[(df_s['ID'] == uid) & (df_s['Password'] == upass)]
+                    if not match.empty:
+                        # تحديد الرتبة (طالب أو ولي أمر)
+                        st.session_state.role = str(match.iloc[0].get('Roll', 'student')).lower()
+                        st.session_state.user = match.iloc[0]
                         st.rerun()
-                except: pass
                 
-                st.error("بيانات الدخول غير صحيحة | Invalid Login")
+                st.error("خطأ في البيانات، حاول مرة أخرى.")
 
-# --- 5. لوحة تحكم المعلم (Teacher Command Center) ---
+# --- 5. لوحة المعلم ---
 elif st.session_state.role == 'teacher':
-    st.sidebar.markdown(f"### 👨‍🏫 Mr. Ibrahim")
-    menu = st.sidebar.radio("القائمة", ["Dashboard", "Exam Preview", "Add Exam", "Students Matrix"])
-    
-    if st.sidebar.button("Logout | خروج"):
-        st.session_state.role = None
-        st.rerun()
+    with st.sidebar:
+        st.markdown(f"### أهلاً مستر إبراهيم")
+        menu = st.radio("القائمة الرئيسية", ["مصفوفة النتائج", "عرض الاختبارات للشرح", "إضافة اختبار جديد"])
+        if st.button("تسجيل الخروج"):
+            st.session_state.role = None
+            st.rerun()
 
-    if menu == "Dashboard":
-        st.title("📈 Performance Analytics")
-        try:
-            df_grades = load_data("Grades")
-            df_grades['Score'] = pd.to_numeric(df_grades['Score'], errors='coerce')
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Submissions", len(df_grades))
-            col2.metric("Avg Score", f"{df_grades['Score'].mean():.1f}%")
-            col3.metric("Highest", f"{df_grades['Score'].max()}%")
-            
-            fig = px.histogram(df_grades, x="Score", nbins=10, title="Grade Distribution", color_discrete_sequence=['#10b981'])
-            st.plotly_chart(fig, use_container_width=True)
-        except: st.info("لا توجد درجات مسجلة بعد.")
-
-    elif menu == "Exam Preview":
-        st.title("🖥️ شرح الاختبارات")
-        df_exams = load_data("Exams")
-        sel_ex = st.selectbox("اختر الاختبار للشرح", df_exams['Title'].unique())
-        ex_code = df_exams[df_exams['Title'] == sel_ex].iloc[0]['HTML_Code']
-        components.html(ex_code, height=900, scrolling=True)
-
-    elif menu == "Add Exam":
-        st.title("➕ إضافة اختبار/واجب جديد")
-        with st.form("new_exam"):
-            e_id = st.text_input("Exam ID (EX-00)")
-            e_title = st.text_input("Title")
-            e_lesson = st.text_input("Lesson Name (اسم الدرس)")
-            e_section = st.selectbox("Section", ["12A", "12B", "12C", "All"])
-            e_end = st.date_input("End Date")
-            e_dur = st.number_input("Duration (Min)", value=45)
-            e_html = st.text_area("HTML Quiz Code", height=200)
-            if st.form_submit_button("نشر الاختبار"):
-                st.success("تم تجهيز البيانات! انسخها لملف الإكسيل.")
-                st.code(f"{e_id} | {e_title} | {e_lesson} | {e_end}")
-
-    elif menu == "Students Matrix":
-        st.title("👥 إدارة الطلاب ومصفوفة النتائج")
+    if menu == "مصفوفة النتائج":
+        st.title("📊 مصفوفة نتائج الطلاب")
         df_s = load_data("Students")
-        st.dataframe(df_s, use_container_width=True)
+        df_g = load_data("Grades")
+        
+        if not df_s.empty and not df_g.empty:
+            all_sections = ["الكل"] + list(df_s['Section'].unique())
+            selected_sec = st.selectbox("اختر الشعبة لعرض النتائج", all_sections)
+            
+            # فلترة الطلاب حسب الشعبة
+            if selected_sec != "الكل":
+                df_s = df_s[df_s['Section'] == selected_sec]
+            
+            # دمج البيانات
+            df_g['Score'] = pd.to_numeric(df_g['Score'], errors='coerce')
+            merged = pd.merge(df_s[['ID', 'Name']], df_g[['SID', 'EID', 'Score']], left_on='ID', right_on='SID', how='left')
+            
+            # إنشاء المصفوفة
+            matrix = merged.pivot_table(index='Name', columns='EID', values='Score', aggfunc='max').fillna("-")
+            
+            st.markdown(f"### نتائج شعبة: {selected_sec}")
+            st.dataframe(matrix, use_container_width=True)
+            
+            # زر الطباعة
+            if st.button("🖨️ طباعة التقرير / حفظ PDF"):
+                st.markdown("<script>window.print();</script>", unsafe_allow_html=True)
+        else:
+            st.info("لا توجد بيانات درجات مسجلة حالياً.")
 
-# --- 6. لوحة تحكم الطالب (Student Path) ---
-elif st.session_state.role == 'student':
+    elif menu == "عرض الاختبارات للشرح":
+        df_ex = load_data("Exams")
+        sel = st.selectbox("اختر الاختبار", df_ex['Title'].unique() if not df_ex.empty else [])
+        if sel:
+            code = df_ex[df_ex['Title'] == sel].iloc[0]['HTML_Code']
+            components.html(code, height=800, scrolling=True)
+
+    elif menu == "إضافة اختبار جديد":
+        st.title("➕ إضافة تقييم جديد")
+        with st.form("exam_add"):
+            st.text_input("كود الاختبار (EID)")
+            st.text_input("العنوان")
+            st.text_input("اسم الدرس")
+            st.selectbox("الشعبة", ["12A", "12B", "12C", "الكل"])
+            st.date_input("تاريخ الانتهاء")
+            st.text_area("كود HTML")
+            st.form_submit_button("حفظ")
+
+# --- 6. لوحة الطالب (Fixing White Screen) ---
+elif st.session_state.role in ['student', 'parent']:
     user = st.session_state.user
-    st.sidebar.markdown(f"### 🎓 {user['Name']}")
-    st.sidebar.write(f"Section: {user['Section']}")
-    
-    if st.sidebar.button("Logout | خروج"):
+    st.sidebar.markdown(f"### {user['Name']}")
+    if st.sidebar.button("خروج"):
         st.session_state.role = None
         st.rerun()
 
-    st.title("My Learning Path | مساري التعليمي")
+    st.title("📚 مساري التعليمي")
     
-    # تحميل البيانات
+    # تحميل البيانات بأمان
     df_exams = load_data("Exams")
     df_grades = load_data("Grades")
     
-    # تصفية الاختبارات لشعبة الطالب
-    my_exams = df_exams[(df_exams['Section'] == user['Section']) | (df_exams['Section'] == 'All')]
-    
-    # تجميع الاختبارات حسب الدرس
-    lessons = my_exams['Lesson'].unique()
-    
-    for lesson in lessons:
-        with st.expander(f"📚 الدرس: {lesson}"):
-            l_exams = my_exams[my_exams['Lesson'] == lesson]
-            for _, ex in l_exams.iterrows():
-                # التحقق من الحل السابق
-                attempt = df_grades[(df_grades['SID'] == str(user['ID'])) & (df_grades['EID'] == ex['Exam_ID'])]
-                
-                c1, c2, c3 = st.columns([3, 1, 2])
-                c1.write(f"**{ex['Title']}**")
-                
-                if not attempt.empty:
-                    c2.markdown("<span class='status-done'>DONE</span>", unsafe_allow_html=True)
-                    score = attempt.iloc[0]['Score']
-                    c3.write(f"Result: {score}%")
-                    # مراجعة الإجابات بصلاحية المعلم
-                    if str(ex['Show_Answers']).upper() == "TRUE":
-                        if st.button("Review", key=f"rev_{ex['Exam_ID']}"):
-                            components.html(ex['HTML_Code'], height=800, scrolling=True)
-                else:
-                    c2.markdown("<span class='status-wanted'>WANTED</span>", unsafe_allow_html=True)
-                    if st.button("Start", key=f"start_{ex['Exam_ID']}"):
-                        components.html(ex['HTML_Code'], height=800, scrolling=True)
-
-# --- 7. لوحة تحكم ولي الأمر (Parent Dashboard) ---
-elif st.session_state.role == 'parent':
-    user = st.session_state.user
-    st.title(f"🏠 متابعة ولي الأمر: {user['Name']}")
-    df_grades = load_data("Grades")
-    my_child = df_grades[df_grades['SID'] == str(user['ID'])]
-    
-    if not my_child.empty:
-        my_child['Score'] = pd.to_numeric(my_child['Score'])
-        fig = px.line(my_child, x='Date', y='Score', title="منحنى تطور مستوى الطالب", markers=True)
-        st.plotly_chart(fig, use_container_width=True)
-        st.table(my_child[['EID', 'Score', 'Date']])
+    if not df_exams.empty:
+        # تصفية شعبة الطالب
+        u_sec = user.get('Section', '')
+        my_exams = df_exams[(df_exams['Section'] == u_sec) | (df_exams['Section'] == 'الكل')]
+        
+        lessons = my_exams['Lesson'].unique()
+        for lesson in lessons:
+            with st.expander(f"📖 درس: {lesson}"):
+                l_ex = my_exams[my_exams['Lesson'] == lesson]
+                for _, ex in l_ex.iterrows():
+                    c1, c2, c3 = st.columns([3, 1, 1.5])
+                    c1.write(ex['Title'])
+                    
+                    # فحص هل الطالب حل الاختبار؟
+                    is_done = False
+                    if not df_grades.empty:
+                        attempt = df_grades[(df_grades['SID'] == user['ID']) & (df_grades['EID'] == ex['Exam_ID'])]
+                        is_done = not attempt.empty
+                    
+                    if is_done:
+                        c2.markdown("<span class='status-done'>DONE</span>", unsafe_allow_html=True)
+                        if str(ex.get('Show_Answers', '')).upper() == "TRUE":
+                            if c3.button("مراجعة", key=f"rev_{ex['Exam_ID']}"):
+                                components.html(ex['HTML_Code'], height=600)
+                    else:
+                        c2.markdown("<span class='status-wanted'>WANTED</span>", unsafe_allow_html=True)
+                        if c3.button("بدء الآن", key=f"start_{ex['Exam_ID']}"):
+                            components.html(ex['HTML_Code'], height=600)
     else:
-        st.info("لا توجد نتائج مسجلة للطالب بعد.")
+        st.info("لا توجد اختبارات منشورة حالياً.")
