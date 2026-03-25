@@ -1,3 +1,16 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
+# --- 1. التأكد من حالة الجلسة (Session State) ---
+if 'role' not in st.session_state:
+    st.session_state.role = None
+    st.session_state.user = None
+
+# --- 2. إعدادات الصفحة (يجب أن تكون بعد الـ Imports مباشرة) ---
+st.set_page_config(page_title="NIFHAM Math PRO", layout="wide")
+
+# بقية الكود اللي كتبناه للتحقق من الدخول والربط...
 # --- 3. AUTH LOGIC (Improved for Teacher Login) ---
 if 'role' not in st.session_state:
     st.session_state.role = None
