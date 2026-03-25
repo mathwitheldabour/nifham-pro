@@ -1,131 +1,133 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime
 import time
+from datetime import datetime
 
-# Page Configuration / إعدادات الصفحة
+# 1. Page Configuration / إعدادات الصفحة
 st.set_page_config(page_title="NIFHAM Math Platform", layout="centered")
 
-# Custom CSS for Bilingual UI / تنسيق الواجهة
+# Custom CSS for Professional Look / تنسيق المظهر
 st.markdown("""
     <style>
-    .main { background-color: #f9f9f9; }
-    .stButton>button { width: 100%; border-radius: 10px; }
-    .arabic-text { direction: rtl; text-align: right; color: #666; font-size: 0.9em; }
+    .main { background-color: #f4f7f6; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; height: 3em; }
+    .arabic-text { direction: rtl; text-align: right; color: #555; font-size: 0.9em; margin-top: -15px; }
+    .exam-card { padding: 20px; border-radius: 10px; border: 1px solid #ddd; background-color: white; margin-bottom: 10px; }
+    .timer-text { color: #d9534f; font-weight: bold; font-size: 1.2em; }
     </style>
     """, unsafe_allow_html=True)
 
-# 1. Connect to Google Sheets / الربط مع جوجل شيت
-# Note: Ensure your secrets.toml is configured with the spreadsheet URL
+# 2. Connection Initialization / إعداد الاتصال
+# سيقوم الكود بالبحث عن الرابط في الـ Secrets تلقائياً
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_data(sheet_name):
-    return conn.read(worksheet=sheet_name)
+def get_sheet_data(name):
+    try:
+        # قراءة البيانات مع إلغاء الكاش لضمان التحديث المستمر
+        return conn.read(worksheet=name, ttl=0)
+    except Exception as e:
+        st.error(f"Connection Error: Please ensure the sheet is shared as 'Anyone with link' / تأكد من مشاركة الشيت للجميع")
+        return pd.DataFrame()
 
-# 2. Login Logic / منطق تسجيل الدخول
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.user_info = None
+# 3. Session State Management / إدارة الجلسة
+if 'login_status' not in st.session_state:
+    st.session_state.login_status = False
+    st.session_state.user = None
+    st.session_state.current_exam = None
 
-if not st.session_state.logged_in:
+# --- UI LOGIC ---
+
+# A. Login Screen / شاشة تسجيل الدخول
+if not st.session_state.login_status:
     st.title("Student Login")
     st.markdown('<p class="arabic-text">تسجيل دخول الطالب</p>', unsafe_allow_html=True)
     
     with st.form("login_form"):
-        student_id = st.text_input("Student ID / رقم الطالب")
-        password = st.text_input("Password / كلمة المرور", type="password")
-        submit = st.form_submit_button("Login / دخول")
+        u_id = st.text_input("Student ID / رقم الطالب")
+        u_pass = st.text_input("Password / كلمة المرور", type="password")
+        submit = st.form_submit_button("Sign In / دخول")
         
         if submit:
-            df_students = get_data("Students")
-            # التحقق من البيانات بناءً على شيت Students (ID في العمود A و Password في العمود C)
-            user = df_students[(df_students['ID'].astype(str) == student_id) & 
-                               (df_students['Password'].astype(str) == password)]
-            
-            if not user.empty:
-                st.session_state.logged_in = True
-                st.session_state.user_info = user.iloc[0].to_dict()
-                st.rerun()
-            else:
-                st.error("Invalid ID or Password / خطأ في البيانات")
+            df_students = get_sheet_data("Students")
+            if not df_students.empty:
+                # البحث في شيت الطلاب بناءً على الصورة المرسلة (ID و Password)
+                user_match = df_students[
+                    (df_students['ID'].astype(str) == str(u_id)) & 
+                    (df_students['Password'].astype(str) == str(u_pass))
+                ]
+                
+                if not user_match.empty:
+                    st.session_state.login_status = True
+                    st.session_state.user = user_match.iloc[0].to_dict()
+                    st.success("Login Successful! / تم الدخول بنجاح")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("Invalid ID or Password / بيانات الدخول غير صحيحة")
 
-# 3. Dashboard & Exam Selection / لوحة التحكم واختيار الامتحان
-else:
-    user = st.session_state.user_info
-    st.sidebar.write(f"Welcome / أهلاً بك: **{user['Name']}**")
-    st.sidebar.write(f"Section / الشعبة: **{user['Section']}**")
+# B. Exam Selection & Dashboard / لوحة الامتحانات
+elif st.session_state.login_status and st.session_state.current_exam is None:
+    user = st.session_state.user
+    st.title(f"Welcome, {user['Name']}")
+    st.markdown(f'<p class="arabic-text">أهلاً بك يا {user["Name"]}</p>', unsafe_allow_html=True)
     
-    if st.sidebar.button("Logout / خروج"):
-        st.session_state.logged_in = False
-        st.rerun()
+    st.sidebar.button("Logout / خروج", on_click=lambda: st.session_state.update({"login_status": False}))
 
-    if 'taking_exam' not in st.session_state:
-        st.title("Available Exams")
-        st.markdown('<p class="arabic-text">الامتحانات المتاحة لك</p>', unsafe_allow_html=True)
-        
-        df_exams = get_data("Exams")
-        now = datetime.now()
-        
-        # تصفية الامتحانات بناءً على الشعبة والحالة والتاريخ
-        # Columns: Exam_ID, Title, Lesson, Section, End_Date, Duration, HTML_Code, Status
-        available_exams = df_exams[
+    st.subheader("Available Exams / الامتحانات المتاحة")
+    df_exams = get_sheet_data("Exams")
+    
+    if not df_exams.empty:
+        # تصفية الامتحانات حسب الشعبة والحالة (Active)
+        # الأعمدة: Exam_ID, Title, Lesson, Section, Duration, Status
+        my_exams = df_exams[
             (df_exams['Status'] == 'Active') & 
             ((df_exams['Section'] == user['Section']) | (df_exams['Section'] == 'All'))
         ]
         
-        if available_exams.empty:
-            st.info("No exams available currently / لا توجد امتحانات حالياً")
+        if my_exams.empty:
+            st.info("No active exams for your section / لا توجد امتحانات متاحة لشعبتك حالياً")
         else:
-            for index, row in available_exams.iterrows():
+            for _, row in my_exams.iterrows():
                 with st.container():
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.subheader(row['Title'])
-                        st.write(f"Lesson: {row['Lesson']} | Duration: {row['Duration']} mins")
-                    with col2:
-                        if st.button(f"Start / ابدأ", key=row['Exam_ID']):
-                            st.session_state.taking_exam = row.to_dict()
-                            st.session_state.start_time = time.time()
-                            st.rerun()
-                st.divider()
+                    st.markdown(f"""
+                        <div class="exam-card">
+                            <h4>{row['Title']}</h4>
+                            <p>Lesson: {row['Lesson']} | Duration: {row['Duration']} Mins</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    if st.button(f"Start Exam / ابدأ الامتحان", key=f"btn_{row['Exam_ID']}"):
+                        st.session_state.current_exam = row.to_dict()
+                        st.session_state.start_time = time.time()
+                        st.rerun()
 
-    # 4. Exam Player / مشغل الامتحان
+# C. Exam Player / مشغل الامتحان
+else:
+    exam = st.session_state.current_exam
+    user = st.session_state.user
+    
+    st.title(exam['Title'])
+    
+    # Timer Logic / حساب الوقت
+    elapsed = int(time.time() - st.session_state.start_time)
+    remaining = (int(exam['Duration']) * 60) - elapsed
+    
+    if remaining <= 0:
+        st.error("Time is up! / انتهى وقت الامتحان")
+        if st.button("Return to Dashboard"):
+            st.session_state.current_exam = None
+            st.rerun()
     else:
-        exam = st.session_state.taking_exam
-        st.title(exam['Title'])
+        mins, secs = divmod(remaining, 60)
+        st.markdown(f'<p class="timer-text">Time Remaining / الوقت المتبقي: {mins:02d}:{secs:02d}</p>', unsafe_allow_html=True)
         
-        # Timer Logic / منطق المؤقت
-        elapsed_time = int(time.time() - st.session_state.start_time)
-        remaining_time = (exam['Duration'] * 60) - elapsed_time
+        # Display Exam Content (HTML) / عرض محتوى الامتحان
+        st.components.v1.html(exam['HTML_Code'], height=600, scrolling=True)
         
-        if remaining_time <= 0:
-            st.error("Time is up! / انتهى الوقت")
-            # Auto-submit logic can be added here
-            if st.button("Back to Dashboard"):
-                del st.session_state.taking_exam
-                st.rerun()
-        else:
-            mins, secs = divmod(remaining_time, 60)
-            st.metric("Time Remaining / الوقت المتبقي", f"{mins:02d}:{secs:02d}")
-            
-            # Rendering HTML_Code from Sheet / عرض كود الأسئلة
-            st.components.v1.html(exam['HTML_Code'], height=500, scrolling=True)
-            
-            if st.button("Submit Exam / إنهاء الامتحان"):
-                # Saving results to "Grades" sheet
-                new_grade = pd.DataFrame([{
-                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "Student_ID": user['ID'],
-                    "Student_Name": user['Name'],
-                    "Exam_ID": exam['Exam_ID'],
-                    "Score": "Pending / قيد التصحيح" # يمكن تطوير التصحيح التلقائي هنا
-                }])
-                
-                # تحديث شيت الدرجات (تحتاج لبرمجة دالة الحفظ حسب نوع الربط)
-                # conn.create(worksheet="Grades", data=new_grade) 
-                
-                st.success("Exam submitted successfully! / تم تسليم الامتحان")
-                time.sleep(2)
-                del st.session_state.taking_exam
-                st.rerun()
+        if st.button("Submit Exam / تسليم الإجابات"):
+            # هنا يتم إضافة الكود الخاص بحفظ الدرجة في شيت Grades
+            st.balloons()
+            st.success("Submitted successfully! / تم التسليم بنجاح")
+            time.sleep(2)
+            st.session_state.current_exam = None
+            st.rerun()
