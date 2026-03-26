@@ -172,56 +172,30 @@ elif st.session_state.role == 'student':
     tab1, tab2, tab3 = st.tabs(["📋 Assigned Exams", "✅ Grade History", "📊 My Performance"])
 
     # --- TAB 1: الاختبارات المجدولة (Portal Logic) ---
-    with tab1:
-        st.subheader("Current Assignments")
-        now = datetime.now()
-        
-        if not df_ex_stu.empty:
-            # فلترة: نشط + الشعبة صحيحة + لم يتم حله سابقاً
-            req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
-            taken_ids = my_grades['Exam_ID'].unique().tolist()
-            req = req[~req['Exam_ID'].astype(str).isin(map(str, taken_ids))]
+# --- داخل كود الطالب في app.py ---
+with tab1:
+    st.subheader("Current Assignments")
+    
+    # 1. جلب الدرجات المسجلة للطالب الآن (لضمان التحديث اللحظي)
+    df_gr_realtime = clean_data(load_sheet("Grades"))
+    my_taken_ids = df_gr_realtime[df_gr_realtime['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
+    
+    # 2. فلترة الاختبارات: (نشطة) + (شعبتي) + (ليست في قائمة الـ taken)
+    req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
+    
+    # تحويل IDs لنصوص للمقارنة الدقيقة
+    req_pending = req[~req['Exam_ID'].astype(str).isin(map(str, my_taken_ids))]
 
-            valid_count = 0
-            for _, row in req.iterrows():
-                try:
-                    st_dt = datetime.strptime(str(row['Start_Time']), '%Y-%m-%d %H:%M:%S')
-                    en_dt = datetime.strptime(str(row['End_Time']), '%Y-%m-%d %H:%M:%S')
-                except:
-                    st_dt = en_dt = now
-
-                if st_dt <= now <= en_dt:
-                    valid_count += 1
-                    with st.container():
-                        st.markdown(f"""
-                        <div class="exam-card">
-                            <h3 style="margin:0; color:#007bff;">{row['Title']}</h3>
-                            <p style="margin:5px 0; color:#555;">Duration: {row['Duration']} Minutes</p>
-                            <small style="color:#d9534f;">Deadline: {en_dt.strftime('%I:%M %p')}</small>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # --- الرابط السحري لفتح امتحان GAS ---
-                        # استبدل هذا الرابط برابط الـ Deployment الخاص بك من Google Apps Script
-                        gas_web_app_url = "رابط_الـ_Web_App_الخاص_بك_هنا"
-                        full_exam_url = f"https://script.google.com/macros/s/AKfycbz8yAfV-3V-W8Qp19CPSZ8Nl9gHvCIJLOI23SQuQwpRpDT0DVRH9kpjoAdg3TFIoHzQ/exec"
-                        
-                        st.markdown(f"""
-                            <a href="{full_exam_url}" target="_blank" style="text-decoration: none;">
-                                <div style="background-color: #28a745; color: white; padding: 12px; text-align: center; border-radius: 8px; font-weight: bold; margin-top: 10px;">
-                                    Start Exam in New Window / بدء الاختبار في نافذة جديدة
-                                </div>
-                            </a>
-                        """, unsafe_allow_html=True)
-                        st.caption("Note: Equations will render perfectly in the new window.")
-                
-                elif now < st_dt:
-                    st.info(f"🕒 Upcoming: **{row['Title']}** (Available at {st_dt.strftime('%I:%M %p')})")
-
-            if valid_count == 0 and not any(now < datetime.strptime(str(r['Start_Time']), '%Y-%m-%d %H:%M:%S') for _, r in req.iterrows() if 'Start_Time' in r):
-                st.success("You are all caught up! No active exams. / لا توجد اختبارات مطلوبة حالياً")
-        else:
-            st.info("No exams published yet.")
+    if req_pending.empty:
+        st.success("No pending exams! / لا توجد اختبارات مطلوبة")
+    else:
+        for _, row in req_pending.iterrows():
+            # (منطق عرض البطاقة والزر)
+            gas_web_app_url = "رابط_الـ_Web_App_الخاص_بك_هنا"
+            full_exam_url = f"{gas_web_app_url}?sid={u['ID']}&name={u['Name']}&eid={row['Exam_ID']}"
+            
+            st.markdown(f'<div class="exam-card"><b>{row["Title"]}</b></div>', unsafe_allow_html=True)
+            st.markdown(f'<a href="{full_exam_url}" target="_blank">Start Exam</a>', unsafe_allow_html=True)
 
     # --- TAB 2: سجل الدرجات والتدريب ---
     with tab2:
