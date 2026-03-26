@@ -75,18 +75,19 @@ elif st.session_state.role == 'teacher':
         st.session_state.update({'auth': False, 'user': None, 'role': None})
         st.rerun()
 
-    # تحميل البيانات المطلوبة للوحة المعلم
+    # تحميل البيانات المطلوبة
     df_exams = load_sheet("Exams")
     df_students = load_sheet("Students")
     df_grades = load_sheet("Grades")
     
+    # محاولة جلب الشعب من شيت Sections
     try:
         df_all_sections = load_sheet("Sections")
         available_sections = df_all_sections['Section_Name'].unique().tolist()
     except:
         available_sections = []
 
-    # --- القسم الأول: إضافة اختبار جديد ---
+    # --- 1. إضافة اختبار جديد ---
     if menu == "Add Exam":
         st.header("📝 Create New Exam / إضافة اختبار جديد")
         with st.form("new_exam_form"):
@@ -116,67 +117,46 @@ elif st.session_state.role == 'teacher':
             if st.form_submit_button("Save Exam / حفظ الاختبار"):
                 start_dt = f"{s_date} {s_time}"
                 end_dt = f"{n_date} {n_time}"
-                new_exam_df = pd.DataFrame([{
+                new_row = pd.DataFrame([{
                     "Exam_ID": str(e_id).strip(), "Title": str(e_title).strip(),
                     "Lesson": str(e_lesson).strip(), "Section": ",".join(map(str, target_sec)),
                     "Duration": int(e_dur), "Start_DateTime": start_dt,
                     "End_DateTime": end_dt, "HTML_Code": e_html,
                     "Status": e_status, "Show_Answers": show_ans
                 }])
-                conn.create(worksheet="Exams", data=new_exam_df)
+                conn.create(worksheet="Exams", data=new_row)
                 st.success("Exam saved successfully! / تم الحفظ بنجاح")
 
-    # --- القسم الثاني: الإدارة (شعب وطلاب) ---
-   elif menu == "Management":
+    # --- 2. الإدارة (شعب وطلاب) ---
+    elif menu == "Management":
         st.header("⚙️ Management / الإدارة")
         tab1, tab2 = st.tabs(["Add Section / إضافة شعبة", "Add Student / إضافة طالب"])
         
         with tab1:
-            st.subheader("Create New Section")
             with st.form("sec_form"):
                 new_sec_name = st.text_input("Section Name / اسم الشعبة")
                 if st.form_submit_button("Create Section"):
-                    if new_sec_name:
-                        try:
-                            # 1. جلب البيانات القديمة أولاً (إذا وجدت)
-                            try:
-                                existing_sections = load_sheet("Sections")
-                            except:
-                                existing_sections = pd.DataFrame(columns=["Section_Name"])
-                            
-                            # 2. إضافة الشعبة الجديدة للبيانات
-                            new_row = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
-                            updated_df = pd.concat([existing_sections, new_row], ignore_index=True)
-                            
-                            # 3. حفظ البيانات بالكامل (هذا الأمر يتطلب وجود تبويب اسمه Sections)
-                            conn.update(worksheet="Sections", data=updated_df)
-                            
-                            st.success(f"Section '{new_sec_name}' added successfully!")
-                            time.sleep(1)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: Please make sure a tab named 'Sections' exists in your Google Sheet and the Service Account is an 'Editor'.")
-                            st.info("خطأ: تأكد من وجود تبويب باسم Sections وأن إيميل جوجل كلاود له صلاحية محرر (Editor)")
-                    else:
-                        st.warning("Enter a name first!")
+                    new_sec_df = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
+                    conn.create(worksheet="Sections", data=new_sec_df)
+                    st.success("Section added!")
+                    time.sleep(1)
+                    st.rerun()
 
         with tab2:
-            # كود إضافة الطلاب كما هو، لكن تأكد من جلب الشعب من شيت Sections
-            try:
-                list_of_sections = load_sheet("Sections")['Section_Name'].tolist()
+            if not available_sections:
+                st.warning("Please add a Section first! / أضف شعبة أولاً")
+            else:
                 with st.form("stu_form"):
-                    s_name = st.text_input("Name")
-                    s_id = st.text_input("ID")
-                    s_sec = st.selectbox("Select Section", list_of_sections)
+                    s_name = st.text_input("Full Name / الاسم")
+                    s_id = st.text_input("ID / الرقم")
+                    s_sec = st.selectbox("Select Section", available_sections)
                     s_pass = st.text_input("Password", value=str(random.randint(1000, 9999)))
-                    if st.form_submit_button("Register"):
-                        new_stu = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
-                        conn.create(worksheet="Students", data=new_stu) # أو استخدم conn.update للإضافة
-                        st.success("Student added!")
-            except:
-                st.warning("Please create a Section first in the other tab.")
-                
-    # --- القسم الثالث: مصفوفة النتائج (السطر 165 المصحح) ---
+                    if st.form_submit_button("Register Student"):
+                        new_s_df = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
+                        conn.create(worksheet="Students", data=new_s_df)
+                        st.success("Student added successfully!")
+
+    # --- 3. مصفوفة النتائج ---
     elif menu == "Exams Matrix":
         st.header("📊 Results Matrix / مصفوفة النتائج")
         if not df_grades.empty:
@@ -185,7 +165,7 @@ elif st.session_state.role == 'teacher':
         else:
             st.info("No grades yet / لا توجد درجات مسجلة")
 
-    # --- القسم الرابع: تحليل مستوى الطالب ---
+    # --- 4. تحليل مستوى الطالب ---
     elif menu == "Student Analysis":
         st.header("👤 Individual Analysis / تحليل المستوى")
         if not df_students.empty:
@@ -194,9 +174,9 @@ elif st.session_state.role == 'teacher':
             if not stu_data.empty:
                 fig = px.line(stu_data, x='Date', y='Score', title=f"Progress: {selected_stu}")
                 st.plotly_chart(fig)
-                st.table(stu_data[['Date', 'Exam_ID', 'Score']])
             else:
                 st.warning("No data for this student.")
+
 # --- 6. Student Dashboard / لوحة الطالب ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
