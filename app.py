@@ -127,34 +127,55 @@ elif st.session_state.role == 'teacher':
                 st.success("Exam saved successfully! / تم الحفظ بنجاح")
 
     # --- القسم الثاني: الإدارة (شعب وطلاب) ---
-    elif menu == "Management":
+   elif menu == "Management":
         st.header("⚙️ Management / الإدارة")
         tab1, tab2 = st.tabs(["Add Section / إضافة شعبة", "Add Student / إضافة طالب"])
         
         with tab1:
+            st.subheader("Create New Section")
             with st.form("sec_form"):
                 new_sec_name = st.text_input("Section Name / اسم الشعبة")
                 if st.form_submit_button("Create Section"):
-                    new_sec_df = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
-                    conn.create(worksheet="Sections", data=new_sec_df)
-                    st.success("Section added!")
-                    time.sleep(1)
-                    st.rerun()
+                    if new_sec_name:
+                        try:
+                            # 1. جلب البيانات القديمة أولاً (إذا وجدت)
+                            try:
+                                existing_sections = load_sheet("Sections")
+                            except:
+                                existing_sections = pd.DataFrame(columns=["Section_Name"])
+                            
+                            # 2. إضافة الشعبة الجديدة للبيانات
+                            new_row = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
+                            updated_df = pd.concat([existing_sections, new_row], ignore_index=True)
+                            
+                            # 3. حفظ البيانات بالكامل (هذا الأمر يتطلب وجود تبويب اسمه Sections)
+                            conn.update(worksheet="Sections", data=updated_df)
+                            
+                            st.success(f"Section '{new_sec_name}' added successfully!")
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: Please make sure a tab named 'Sections' exists in your Google Sheet and the Service Account is an 'Editor'.")
+                            st.info("خطأ: تأكد من وجود تبويب باسم Sections وأن إيميل جوجل كلاود له صلاحية محرر (Editor)")
+                    else:
+                        st.warning("Enter a name first!")
 
         with tab2:
-            if not available_sections:
-                st.warning("Add a section first! / أضف شعبة أولاً")
-            else:
+            # كود إضافة الطلاب كما هو، لكن تأكد من جلب الشعب من شيت Sections
+            try:
+                list_of_sections = load_sheet("Sections")['Section_Name'].tolist()
                 with st.form("stu_form"):
-                    s_name = st.text_input("Full Name / الاسم")
-                    s_id = st.text_input("ID / الرقم")
-                    s_sec = st.selectbox("Select Section", available_sections)
+                    s_name = st.text_input("Name")
+                    s_id = st.text_input("ID")
+                    s_sec = st.selectbox("Select Section", list_of_sections)
                     s_pass = st.text_input("Password", value=str(random.randint(1000, 9999)))
-                    if st.form_submit_button("Register Student"):
-                        new_s_df = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
-                        conn.create(worksheet="Students", data=new_s_df)
-                        st.success("Student added successfully!")
-
+                    if st.form_submit_button("Register"):
+                        new_stu = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
+                        conn.create(worksheet="Students", data=new_stu) # أو استخدم conn.update للإضافة
+                        st.success("Student added!")
+            except:
+                st.warning("Please create a Section first in the other tab.")
+                
     # --- القسم الثالث: مصفوفة النتائج (السطر 165 المصحح) ---
     elif menu == "Exams Matrix":
         st.header("📊 Results Matrix / مصفوفة النتائج")
