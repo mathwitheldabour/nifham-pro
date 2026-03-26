@@ -68,12 +68,11 @@ elif st.session_state.role == 'teacher':
         st.session_state.update({'auth': False, 'user': None, 'role': None})
         st.rerun()
 
-    # تحميل البيانات
     df_exams = load_sheet("Exams")
     df_students = clean_data(load_sheet("Students"))
     df_grades = clean_data(load_sheet("Grades"))
     
-    # بناء قائمة الشعب (القديم والجديد)
+    # بناء قائمة الشعب الشاملة
     all_sections = set()
     if not df_students.empty: all_sections.update(df_students['Section'].unique().tolist())
     try:
@@ -82,7 +81,7 @@ elif st.session_state.role == 'teacher':
     except: pass
     final_sections = sorted([s for s in all_sections if str(s).lower() != 'nan' and str(s).strip() != ""])
 
-    # --- القسم الأول: مصفوفة النتائج ---
+    # --- مصفوفة النتائج ---
     if menu == "Exams Matrix":
         st.header("📊 Results Matrix / مصفوفة النتائج")
         if not df_students.empty:
@@ -97,188 +96,98 @@ elif st.session_state.role == 'teacher':
             else: st.warning("No grades found.")
         else: st.error("No students registered.")
 
-    # --- القسم الثاني: تحليل مستوى الطالب ---
-    elif menu == "Student Analysis":
-        st.header("👤 Individual Analysis")
-        if not df_students.empty:
-            c1, c2 = st.columns(2)
-            with c1: sel_s = st.selectbox("Choose Section", final_sections)
-            with c2:
-                stu_list = df_students[df_students['Section'] == sel_s]
-                sel_name = st.selectbox("Choose Student", stu_list['Name'].unique())
-            curr_stu = stu_list[stu_list['Name'] == sel_name].iloc[0]
-            if not df_grades.empty:
-                stu_results = df_grades[df_grades['Student_ID'] == str(curr_stu['ID'])]
-                if not stu_results.empty:
-                    st.subheader(f"Performance for: {sel_name}")
-                    st.table(stu_results[['Date', 'Exam_ID', 'Score']])
-                else: st.warning("No grades recorded.")
-
-    # --- القسم الثالث: الإدارة ---
-    elif menu == "Management":
-        st.header("⚙️ Management / الإدارة")
-        t1, t2 = st.tabs(["Add Section", "Add Student"])
-        with t1:
-            with st.form("add_sec"):
-                n_sec = st.text_input("New Section Name")
-                if st.form_submit_button("Save Section"):
-                    old_sec = load_sheet("Sections")
-                    updated_sec = pd.concat([old_sec, pd.DataFrame([{"Section_Name": n_sec}])], ignore_index=True)
-                    conn.update(worksheet="Sections", data=updated_sec)
-                    st.success("Section Added!"); time.sleep(1); st.rerun()
-        with t2:
-            with st.form("add_stu"):
-                s_n = st.text_input("Name"); s_i = st.text_input("ID")
-                s_s = st.selectbox("Section", final_sections)
-                s_p = st.text_input("Password", value=str(random.randint(1000, 9999)))
-                if st.form_submit_button("Register"):
-                    old_stu = load_sheet("Students")
-                    updated_stu = pd.concat([old_stu, pd.DataFrame([{"ID": s_i, "Name": s_n, "Password": s_p, "Section": s_s}])], ignore_index=True)
-                    conn.update(worksheet="Students", data=updated_stu)
-                    st.success("Student Added!"); time.sleep(1); st.rerun()
-
-    # --- القسم الرابع: إضافة اختبار (تم إصلاح التاريخ والوقت والشعب) ---
+    # --- إضافة اختبار جديد ---
     elif menu == "Add Exam":
         st.header("📝 Create New Exam")
         with st.form("exam_form_final"):
             col_e1, col_e2 = st.columns(2)
             with col_e1:
-                e_id = st.text_input("Exam ID (e.g., E101)")
-                e_ti = st.text_input("Exam Title")
-                e_le = st.text_input("Lesson")
-                st.markdown("---")
-                st.subheader("📅 Start Period")
+                e_id = st.text_input("Exam ID")
+                e_ti = st.text_input("Title")
                 s_date = st.date_input("Start Date", datetime.now())
                 s_time = st.time_input("Start Time", datetime.now().time())
-            
             with col_e2:
-                e_du = st.number_input("Duration (Minutes)", min_value=1, value=60)
-                e_se = st.multiselect("Target Sections", options=final_sections)
-                if not final_sections:
-                    st.warning("⚠️ No sections found. Please add a Section in Management first.")
-                
-                st.markdown("---")
-                st.subheader("📅 End Period")
+                e_du = st.number_input("Duration (Min)", value=60)
+                e_se = st.multiselect("Sections", final_sections)
                 n_date = st.date_input("End Date", datetime.now())
                 n_time = st.time_input("End Time", datetime.now().time())
-
-            e_ht = st.text_area("HTML Code (Questions)")
-            e_ans = st.selectbox("Show Answers After Finish?", ["No", "Yes"])
             
-            if st.form_submit_button("Save Exam / حفظ الاختبار"):
-                if not e_id or not e_se:
-                    st.error("Please fill Exam ID and select at least one Section.")
-                else:
-                    try:
-                        old_ex = load_sheet("Exams")
-                        new_row = pd.DataFrame([{
-                            "Exam_ID": str(e_id), "Title": str(e_ti), "Lesson": str(e_le),
-                            "Section": ",".join(map(str, e_se)), "Duration": int(e_du),
-                            "Start_DateTime": f"{s_date} {s_time}",
-                            "End_DateTime": f"{n_date} {n_time}",
-                            "HTML_Code": e_ht, "Status": "Active", "Show_Answers": e_ans
-                        }])
-                        updated_ex = pd.concat([old_ex, new_row], ignore_index=True)
-                        conn.update(worksheet="Exams", data=updated_ex)
-                        st.success("Exam Published Successfully!"); time.sleep(1); st.rerun()
-                    except Exception as e:
-                        st.error(f"Error saving exam: {e}")
+            e_ht = st.text_area("HTML Code")
+            if st.form_submit_button("Save Exam"):
+                try:
+                    old_ex = load_sheet("Exams")
+                    new_row = pd.DataFrame([{
+                        "Exam_ID": str(e_id), "Title": str(e_ti), 
+                        "Section": ",".join(e_se), "Duration": e_du,
+                        "Start_DateTime": f"{s_date} {s_time}",
+                        "End_DateTime": f"{n_date} {n_time}",
+                        "HTML_Code": e_ht, "Status": "Active"
+                    }])
+                    updated_ex = pd.concat([old_ex, new_row], ignore_index=True)
+                    conn.update(worksheet="Exams", data=updated_ex)
+                    st.success("Exam Saved!"); time.sleep(1); st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
+    # --- الإدارة (شعب وطلاب) ---
+    elif menu == "Management":
+        st.header("⚙️ Management")
+        t1, t2 = st.tabs(["Add Section", "Add Student"])
+        with t1:
+            with st.form("sec"):
+                n_s = st.text_input("New Section Name")
+                if st.form_submit_button("Save Section"):
+                    old = load_sheet("Sections")
+                    upd = pd.concat([old, pd.DataFrame([{"Section_Name": n_s}])], ignore_index=True)
+                    conn.update(worksheet="Sections", data=upd)
+                    st.success("Done!"); time.sleep(1); st.rerun()
+        with t2:
+            with st.form("stu"):
+                s_n = st.text_input("Name"); s_i = st.text_input("ID")
+                s_s = st.selectbox("Section", final_sections)
+                s_p = st.text_input("Password", value=str(random.randint(1000, 9999)))
+                if st.form_submit_button("Register"):
+                    old = load_sheet("Students")
+                    upd = pd.concat([old, pd.DataFrame([{"ID": s_i, "Name": s_n, "Password": s_p, "Section": s_s}])], ignore_index=True)
+                    conn.update(worksheet="Students", data=upd)
+                    st.success("Registered!"); time.sleep(1); st.rerun()
 
-# --- 6. لوحة الطالب المتكاملة (منع التكرار + تسجيل النتيجة) ---
+# --- 6. لوحة الطالب ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    
-    # 1. تحميل البيانات وتأمينها
     df_ex_stu = load_sheet("Exams")
     df_gr_stu = clean_data(load_sheet("Grades"))
-    
-    # تحضير قائمة الامتحانات التي أداها الطالب (لمنع التكرار)
-    taken_exam_ids = []
-    if not df_gr_stu.empty:
-        taken_exam_ids = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
 
     if st.session_state.exam is None:
         st.title(f"مرحباً بك، {u['Name']}")
-        
-        tab1, tab2, tab3 = st.tabs(["📋 الاختبارات المطلوبة", "✅ الاختبارات السابقة", "📊 التحليل والدرجات"])
+        tab1, tab2, tab3 = st.tabs(["📋 الاختبارات المطلوبة", "✅ الاختبارات السابقة", "📊 التحليل"])
 
         with tab1:
-            st.subheader("Current Assignments / المهام الحالية")
-            
-            # 1. جلب بيانات الدرجات الحالية للتفتيش فيها
-            df_gr_check = clean_data(load_sheet("Grades"))
-            
+            st.subheader("Current Assignments")
             if not df_ex_stu.empty:
-                # 2. فلترة الاختبارات حسب الشعبة أولاً
-                required = df_ex_stu[
-                    (df_ex_stu['Status'] == 'Active') & 
-                    (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))
-                ]
-                
-                # 3. المنطق الذكي: استبعاد أي امتحان له سجل درجة لهذا الطالب
-                if not df_gr_check.empty:
-                    # تحويل الأكواد لنصوص لضمان دقة المقارنة
-                    finished_exam_ids = df_gr_check[df_gr_check['Student_ID'] == str(u['ID'])]['Exam_ID'].astype(str).tolist()
-                    # عرض فقط الاختبارات التي "ليست" في قائمة المنتهية
-                    required = required[~required['Exam_ID'].astype(str).isin(finished_exam_ids)]
+                # فلترة ذكية: شعبة الطالب + غير مكرر
+                required = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
+                taken_ids = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
+                required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_ids))]
 
-                # 4. عرض الاختبارات المتبقية فقط
                 if required.empty:
-                    st.success("✅ أحسنت يا بطل! لقد أتممت جميع اختباراتك الحالية.")
-                    st.balloons() # حركة احتفالية بسيطة للطالب
+                    st.success("أحسنت! لا توجد اختبارات حالياً.")
                 else:
                     for _, ex in required.iterrows():
                         with st.container():
-                            st.markdown(f"""<div class="exam-card">
-                                <h4>{str(ex['Title']).replace('.0', '')}</h4>
-                                <p>الدرس: {ex['Lesson']} | المدة: {ex['Duration']} دقيقة</p>
-                            </div>""", unsafe_allow_html=True)
-                            
-                            if st.button("بدء الاختبار الآن", key=f"btn_{ex['Exam_ID']}"):
+                            st.markdown(f'<div class="exam-card"><h4>{str(ex["Title"]).replace(".0", "")}</h4></div>', unsafe_allow_html=True)
+                            if st.button("بدء الاختبار الآن", key=ex['Exam_ID']):
                                 st.session_state.exam = ex.to_dict()
                                 st.session_state.start_t = time.time()
                                 st.rerun()
-            else:
-                st.info("لا توجد اختبارات مضافة حالياً.")
-
         with tab2:
-            st.subheader("Previous Exams")
-            my_done = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
-            if not my_done.empty:
-                st.table(my_done[['Date', 'Exam_ID', 'Score']])
-            else:
-                st.info("لم تؤدِ أي اختبارات بعد.")
-
-        with tab3:
-            st.subheader("Analysis")
-            st.info("سيظهر تحليلك البياني هنا فور رصد درجاتك.")
-
-    # --- 7. مشغل الامتحان (تسجيل النتيجة) ---
+            st.table(df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])])
+    
+    # --- 7. مشغل الامتحان (المصحح والوحيد) ---
     else:
         ex = st.session_state.exam
         st.title(f"الاختبار: {str(ex['Title']).replace('.0', '')}")
         
-        # حساب التايمر
-        elapsed = time.time() - st.session_state.start_t
-        remaining = (int(float(ex['Duration'])) * 60) - elapsed
-        
-        if remaining <= 0:
-            st.error("⚠️ انتهى الوقت!")
-            if st.button("خروج"): st.session_state.exam = None; st.rerun()
-       
-            # --- 7. مشغل الامتحان المطور (بدون إدخال يدوي) ---
-        else:
-        ex = st.session_state.exam
-        
-        # زر العودة للرئيسية
-        if st.button("⬅️ إنهاء الجلسة والعودة للوحة التحكم"):
-            st.session_state.exam = None
-            st.rerun()
-
-        st.title(f"الاختبار: {str(ex['Title']).replace('.0', '')}")
-        
-        # التايمر
         elapsed = time.time() - st.session_state.start_t
         remaining = (int(float(ex['Duration'])) * 60) - elapsed
         
@@ -289,14 +198,11 @@ elif st.session_state.role == 'student':
             mins, secs = divmod(int(remaining), 60)
             st.markdown(f'<div class="timer-box">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
             
-            # --- حقن بيانات الطالب في كود الـ HTML أوتوماتيكياً ---
-            raw_html = str(ex['HTML_Code'])
-            final_html = raw_html.replace("STUDENT_ID_HERE", str(u['ID']))
+            # حقن البيانات في الـ HTML
+            final_html = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID']))
             final_html = final_html.replace("STUDENT_NAME_HERE", str(u['Name']))
             final_html = final_html.replace("EXAM_ID_HERE", str(ex['Exam_ID']))
             
-            # عرض الاختبار
             st.components.v1.html(final_html, height=800, scrolling=True)
-            
-            # (تم حذف مربع إدخال الدرجة اليدوي بناءً على طلبك)
-            st.info("💡 بمجرد ضغطك على 'إرسال' داخل نافذة الاختبار، سيتم تسجيل درجتك فوراً.")
+            st.info("💡 يتم تسجيل درجتك أوتوماتيكياً بمجرد ضغط 'إرسال' داخل نافذة الامتحان.")
+            if st.button("⬅️ العودة للرئيسية"): st.session_state.exam = None; st.rerun()
