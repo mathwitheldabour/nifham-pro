@@ -184,63 +184,53 @@ elif st.session_state.role == 'teacher':
                     except Exception as e:
                         st.error(f"Error saving exam: {e}")
 
-# --- 6. لوحة الطالب المتكاملة (نظام الـ 3 صفحات) ---
+
+# --- 6. لوحة الطالب المتكاملة (منع التكرار + تسجيل النتيجة) ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
     
-    # التحقق: هل الطالب في وضع "داخل امتحان" أم في وضع "اللوحة الرئيسية"؟
+    # 1. تحميل البيانات وتأمينها
+    df_ex_stu = load_sheet("Exams")
+    df_gr_stu = clean_data(load_sheet("Grades"))
+    
+    # تحضير قائمة الامتحانات التي أداها الطالب (لمنع التكرار)
+    taken_exam_ids = []
+    if not df_gr_stu.empty:
+        taken_exam_ids = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
+
     if st.session_state.exam is None:
         st.title(f"مرحباً بك، {u['Name']}")
         
-        if st.sidebar.button("Logout / خروج"):
-            st.session_state.update({'auth': False, 'user': None, 'role': None})
-            st.rerun()
-        
-        # تحميل البيانات
-        df_ex_stu = load_sheet("Exams")
-        df_gr_stu = clean_data(load_sheet("Grades"))
-        
-        # إنشاء التبويبات
         tab1, tab2, tab3 = st.tabs(["📋 الاختبارات المطلوبة", "✅ الاختبارات السابقة", "📊 التحليل والدرجات"])
 
         with tab1:
             st.subheader("Current Assignments / المهام الحالية")
-            now = datetime.now()
-            
             if not df_ex_stu.empty:
-                # تنظيف وتأمين البيانات
-                df_ex_stu['Section'] = df_ex_stu['Section'].astype(str)
-                df_ex_stu['Status'] = df_ex_stu['Status'].astype(str)
-                
-                # فلترة الاختبارات
+                # فلترة الامتحانات حسب الشعبة والحالة "نشط"
                 required = df_ex_stu[
                     (df_ex_stu['Status'] == 'Active') & 
                     (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))
                 ]
                 
-                # استبعاد اللي امتحنه قبل كدة
-                taken_ids = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
-                required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_ids))]
+                # --- (القفل الذكي): استبعاد أي امتحان أداه الطالب سابقاً ---
+                required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_exam_ids))]
 
                 if required.empty:
-                    st.info("لا توجد اختبارات مطلوبة منك حالياً.")
+                    st.info("ممتاز! لا توجد اختبارات مطلوبة منك حالياً.")
                 else:
                     for _, ex in required.iterrows():
                         with st.container():
-                            # عرض الكارت بتنسيق جميل
-                            title_display = str(ex['Title']).replace('.0', '')
                             st.markdown(f"""<div class="exam-card">
-                                <h4>{title_display}</h4>
+                                <h4>{str(ex['Title']).replace('.0', '')}</h4>
                                 <p>الدرس: {ex['Lesson']} | المدة: {ex['Duration']} دقيقة</p>
                             </div>""", unsafe_allow_html=True)
                             
                             if st.button("بدء الاختبار الآن", key=f"btn_{ex['Exam_ID']}"):
-                                # حفظ بيانات الامتحان في الجلسة وبدء التايمر
                                 st.session_state.exam = ex.to_dict()
                                 st.session_state.start_t = time.time()
                                 st.rerun()
             else:
-                st.warning("لا توجد بيانات في جدول الامتحانات.")
+                st.info("لا توجد امتحانات مضافة حالياً.")
 
         with tab2:
             st.subheader("Previous Exams")
@@ -254,57 +244,52 @@ elif st.session_state.role == 'student':
             st.subheader("Analysis")
             st.info("سيظهر تحليلك البياني هنا فور رصد درجاتك.")
 
-    # --- 7. مشغل الامتحان (هذا الجزء يظهر فقط عند بدء الامتحان) ---
+    # --- 7. مشغل الامتحان (تسجيل النتيجة) ---
     else:
         ex = st.session_state.exam
-        
-        # 1. زر الخروج (للطوارئ)
-        if st.button("⬅️ إلغاء والعودة للرئيسية"):
-            st.session_state.exam = None
-            st.rerun()
-
         st.title(f"الاختبار: {str(ex['Title']).replace('.0', '')}")
-        st.markdown(f"**الدرس:** {ex['Lesson']} | **المطلوب:** حل جميع الأسئلة قبل انتهاء الوقت")
         
-        # 2. حساب الوقت المتبقي
-        try:
-            duration_min = int(float(ex['Duration']))
-        except:
-            duration_min = 60
-            
+        # حساب التايمر
         elapsed = time.time() - st.session_state.start_t
-        remaining = (duration_min * 60) - elapsed
+        remaining = (int(float(ex['Duration'])) * 60) - elapsed
         
         if remaining <= 0:
-            st.error("⚠️ انتهى الوقت المحدد للاختبار!")
-            if st.button("العودة للوحة التحكم"):
-                st.session_state.exam = None
-                st.rerun()
+            st.error("⚠️ انتهى الوقت!")
+            if st.button("خروج"): st.session_state.exam = None; st.rerun()
         else:
-            # 3. عرض التايمر
             mins, secs = divmod(int(remaining), 60)
             st.markdown(f'<div class="timer-box">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
             
-            # 4. عرض كود الـ HTML (الأسئلة)
-            html_content = str(ex['HTML_Code'])
-            if html_content and html_content != 'nan':
-                st.components.v1.html(html_content, height=800, scrolling=True)
-            else:
-                st.error("خطأ: كود الاختبار غير موجود في ملف الإكسيل!")
+            # عرض الأسئلة
+            st.components.v1.html(str(ex['HTML_Code']), height=800, scrolling=True)
             
-            # 5. زر التسليم
             st.markdown("---")
-            if st.button("✅ إنهاء وتسليم الاختبار"):
-                # هنا بنسجل درجة افتراضية لحين ربط الـ JS بالدرجة الحقيقية
-                new_grade = pd.DataFrame([{
-                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "Student_ID": str(u['ID']),
-                    "Student_Name": u['Name'],
-                    "Exam_ID": str(ex['Exam_ID']),
-                    "Score": 100 # سيتم تعديله لاحقاً
-                }])
-                conn.update(worksheet="Grades", data=new_grade)
-                st.success("تم تسليم إجاباتك بنجاح!")
-                time.sleep(2)
-                st.session_state.exam = None
-                st.rerun()
+            # لتسجيل النتيجة الحقيقية، الطالب بيدخل درجته اللي ظهرت له في الـ HTML (حل مؤقت بسيط)
+            # أو بنسجل إنه "تم بنجاح" والدرجة 100 كمثال
+            score_input = st.number_input("ادخل الدرجة التي ظهرت لك في الاختبار (للتأكيد)", min_value=0, max_value=100, step=1)
+            
+            if st.form_submit_button if 'form' in globals() else st.button("✅ تسليم النتيجة النهائية"):
+                try:
+                    # 1. جلب الدرجات القديمة
+                    try: old_grades = load_sheet("Grades")
+                    except: old_grades = pd.DataFrame(columns=["Date", "Student_ID", "Student_Name", "Exam_ID", "Score"])
+                    
+                    # 2. إضافة الدرجة الجديدة
+                    new_entry = pd.DataFrame([{
+                        "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Student_ID": str(u['ID']),
+                        "Student_Name": str(u['Name']),
+                        "Exam_ID": str(ex['Exam_ID']),
+                        "Score": score_input # الدرجة المدخلة
+                    }])
+                    
+                    # 3. حفظ في الإكسيل
+                    updated_grades = pd.concat([old_grades, new_entry], ignore_index=True)
+                    conn.update(worksheet="Grades", data=updated_grades)
+                    
+                    st.success("تم تسجيل درجتك بنجاح في سجلات المستر!")
+                    time.sleep(2)
+                    st.session_state.exam = None
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ في التسجيل: {e}")
