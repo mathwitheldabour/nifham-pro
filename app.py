@@ -186,7 +186,26 @@ elif st.session_state.role == 'student':
     df_gr_stu = clean_data(load_sheet("Grades"))
     my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
 
-    if st.session_state.exam is None:
+    # التحقق: هل الطالب في وضع "داخل الامتحان" أم في "اللوحة الرئيسية"؟
+    if st.session_state.exam is not None:
+        # --- 7. Exam Runner (داخل الامتحان) ---
+        ex = st.session_state.exam
+        st.subheader(f"Active Exam: {ex['Title']}")
+        
+        rem = (int(float(ex['Duration'])) * 60) - (time.time() - st.session_state.start_t)
+        
+        if rem <= 0:
+            st.error("Time is Up! / انتهى الوقت")
+            if st.button("Back to Dashboard"): st.session_state.exam = None; st.rerun()
+        else:
+            m, s = divmod(int(rem), 60)
+            st.markdown(f'<div class="timer-box">{m:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+            html_code = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID']))
+            st.components.v1.html(html_code, height=800, scrolling=True)
+            if st.button("Exit Exam"): st.session_state.exam = None; st.rerun()
+            
+    else:
+        # --- اللوحة الرئيسية للطالب ---
         st.title(f"Welcome, {u['Name']} 👋")
         if st.sidebar.button("Logout"):
             st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
@@ -196,39 +215,54 @@ elif st.session_state.role == 'student':
         with tab1:
             st.subheader("Available Exams")
             if not df_ex_stu.empty:
-                # Filter by section and status
                 required = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
                 taken_ids = my_grades['Exam_ID'].unique().tolist()
                 required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_ids))]
                 
-                if required.empty: st.success("All caught up!")
+                if required.empty: st.success("No exams pending!")
                 for _, ex in required.iterrows():
                     st.markdown(f'<div class="exam-card"><b>{ex["Title"]}</b></div>', unsafe_allow_html=True)
-                    if st.button(f"Start {ex['Exam_ID']}", key=ex['Exam_ID']):
+                    if st.button(f"Start Exam", key=ex['Exam_ID']):
                         st.session_state.exam = ex.to_dict()
                         st.session_state.start_t = time.time()
                         st.rerun()
 
         with tab2:
+            st.subheader("Grade History")
             st.table(my_grades[['Exam_ID', 'Score']])
 
         with tab3:
+            st.subheader("Performance Chart")
             if not my_grades.empty:
                 fig = px.line(my_grades, x='Exam_ID', y='Score', title="My Progress", markers=True)
                 st.plotly_chart(fig, use_container_width=True)
 
-# --- 7. Exam Runner ---
-else:
-    ex = st.session_state.exam
-    st.subheader(f"Exam: {ex['Title']}")
-    rem = (int(float(ex['Duration'])) * 60) - (time.time() - st.session_state.start_t)
+# --- 8. Parent Dashboard (Section Added to fix the error) ---
+elif st.session_state.role == 'parent':
+    st.title("👨‍👩‍👦 Parent Portal")
+    st.markdown("<span class='arabic-sub'>بوابة ولي الأمر - متابعة مستوى الأبناء</span>", unsafe_allow_html=True)
     
-    if rem <= 0:
-        st.error("Time Up!"); 
-        if st.button("Back"): st.session_state.exam = None; st.rerun()
+    if st.sidebar.button("Logout"):
+        st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
+    
+    # تحميل بيانات الطالب المرتبط بولي الأمر (بافتراض أن ID ولي الأمر هو نفس ID الطالب للمتابعة)
+    parent_data = st.session_state.user
+    child_id = parent_data.get('ID') # أو أي حقل آخر يربطهم
+    
+    df_all_grades = clean_data(load_sheet("Grades"))
+    child_grades = df_all_grades[df_all_grades['Student_ID'] == str(child_id)]
+    
+    if not child_grades.empty:
+        st.subheader(f"Grades for Student ID: {child_id}")
+        st.dataframe(child_grades[['Exam_ID', 'Score']], use_container_width=True)
+        
+        fig_parent = px.bar(child_grades, x='Exam_ID', y='Score', title="Child's Performance Index")
+        st.plotly_chart(fig_parent, use_container_width=True)
     else:
-        m, s = divmod(int(rem), 60)
-        st.markdown(f'<div class="timer-box">{m:02d}:{s:02d}</div>', unsafe_allow_html=True)
-        html = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(st.session_state.user['ID']))
-        st.components.v1.html(html, height=800, scrolling=True)
-        if st.button("Exit"): st.session_state.exam = None; st.rerun()
+        st.info("No grade records found for your child yet.")
+
+# --- 9. Final Catch ---
+else:
+    st.warning("Please login to access this page.")
+    if st.button("Back to Login"):
+        st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
