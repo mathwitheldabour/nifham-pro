@@ -157,28 +157,71 @@ elif st.session_state.role == 'student':
     my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
 
     if st.session_state.exam is not None:
-        # مشغل الامتحان
+        # --- وضع الامتحان ---
         ex = st.session_state.exam
         st.subheader(f"Exam: {ex['Title']}")
+        
+        # المؤقت
         rem = (int(float(ex.get('Duration', 60))) * 60) - (time.time() - st.session_state.start_t)
+        
         if rem <= 0:
             st.error("Time Expired!"); st.session_state.exam = None; st.rerun()
         else:
             m, s = divmod(int(rem), 60)
             st.markdown(f'<div class="timer-box">{m:02d}:{s:02d}</div>', unsafe_allow_html=True)
-            # Injection & LaTeX Fix
-            html_raw = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID'])).replace("STUDENT_NAME_HERE", str(u['Name']))
-            if "VAR_A" in html_raw:
+            
+            # --- معالجة وحقن البيانات (The Magic) ---
+            html_content = str(ex['HTML_Code'])
+            
+            # استبدال بيانات الطالب
+            html_content = html_content.replace("STUDENT_ID_HERE", str(u['ID']))
+            html_content = html_content.replace("STUDENT_NAME_HERE", str(u['Name']))
+            html_content = html_content.replace("EXAM_ID_HERE", str(ex['Exam_ID']))
+            
+            # استبدال المتغيرات VAR_A, VAR_B
+            if "VAR_A" in html_content:
                 seed_val = sum(ord(c) for c in (str(u['ID']) + str(ex['Exam_ID'])))
                 random.seed(seed_val)
-                html_raw = html_raw.replace("VAR_A", str(random.randint(2, 9))).replace("VAR_B", str(random.randint(2, 5)))
+                html_content = html_content.replace("VAR_A", str(random.randint(2, 9)))
+                html_content = html_content.replace("VAR_B", str(random.randint(2, 5)))
                 random.seed()
-            st.components.v1.html(html_raw.replace("\\", "\\\\"), height=850, scrolling=True)
+
+            # القضاء على مشكلة الـ Backslashes المزدوجة لضمان عمل MathJax
+            # نحول أي علامة مائلة مزدوجة إلى واحدة
+            html_content = html_content.replace("\\\\", "\\")
+            
+            # عرض المكون
+            st.components.v1.html(html_content, height=850, scrolling=True)
+            
             if st.button("Cancel & Exit"): st.session_state.exam = None; st.rerun()
+
     else:
+        # --- لوحة الطالب الرئيسية ---
         st.title(f"Welcome, {u['Name']} 👋")
         if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
 
+        t1, t2, t3 = st.tabs(["📋 Assigned Exams", "✅ Grade History", "📊 Analytics"])
+        
+        with t1:
+            st.subheader("Active Assignments")
+            now = datetime.now()
+            # فلترة الاختبارات حسب الشعبة والوقت
+            req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
+            taken = my_grades['Exam_ID'].unique().tolist()
+            req = req[~req['Exam_ID'].astype(str).isin(map(str, taken))]
+            
+            for _, r in req.iterrows():
+                try:
+                    st_t = datetime.strptime(str(r['Start_Time']), '%Y-%m-%d %H:%M:%S')
+                    en_t = datetime.strptime(str(r['End_Time']), '%Y-%m-%d %H:%M:%S')
+                except: st_t = en_t = now
+                
+                if st_t <= now <= en_t:
+                    st.markdown(f'<div class="exam-card"><b>{r["Title"]}</b><br><small>Deadline: {en_t.strftime("%H:%M")}</small></div>', unsafe_allow_html=True)
+                    if st.button("Start Exam", key=r['Exam_ID']):
+                        st.session_state.exam = r.to_dict(); st.session_state.start_t = time.time(); st.rerun()
+
+        # ... (باقي تبويبات التاريخ والتحليلات كما هي) ...
         t1, t2, t3 = st.tabs(["📋 Assigned", "✅ Grades", "📊 Performance"])
         with t1:
             st.subheader("Pending Exams")
