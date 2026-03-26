@@ -103,18 +103,65 @@ elif st.session_state.role == 'teacher':
                 conn.create(worksheet="Exams", data=new_row)
                 st.success("Exam saved successfully!")
 
-    elif menu == "Management":
+elif menu == "Management":
         st.header("⚙️ Management / الإدارة")
-        with st.form("add_student"):
-            s_name = st.text_input("Name")
-            s_id = st.text_input("ID")
-            s_sec = st.selectbox("Section", df_students['Section'].unique())
-            s_pass = st.text_input("Password", value=str(random.randint(1000, 9999)))
-            if st.form_submit_button("Register Student"):
-                new_s = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
-                conn.create(worksheet="Students", data=new_s)
-                st.success("Student added!")
+        
+        # إنشاء تبويبين: الأول للشعب والثاني للطلاب
+        tab1, tab2 = st.tabs(["Add Section / إضافة شعبة", "Add Student / إضافة طالب"])
+        
+        # 1. إضافة شعبة جديدة
+        with tab1:
+            st.subheader("Add New Section / إضافة شعبة جديدة")
+            with st.form("section_form"):
+                new_sec_name = st.text_input("New Section Name / اسم الشعبة (مثلاً: 12A)")
+                if st.form_submit_button("Save Section / حفظ الشعبة"):
+                    if new_sec_name:
+                        try:
+                            # حفظ الشعبة في شيت "Sections"
+                            new_sec_df = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
+                            conn.create(worksheet="Sections", data=new_sec_df)
+                            st.success(f"Section '{new_sec_name}' added successfully!")
+                            time.sleep(1)
+                            st.rerun() # لإعادة تحميل القوائم بالشعبة الجديدة
+                        except Exception as e:
+                            st.error(f"Error: Make sure a sheet named 'Sections' exists. / تأكد من وجود شيت باسم Sections")
+                    else:
+                        st.warning("Please enter a name / يرجى إدخال اسم")
 
+        # 2. إضافة طالب جديد
+        with tab2:
+            st.subheader("Register Student / تسجيل طالب")
+            # جلب الشعب من شيت "Sections" بدلاً من شيت الطلاب
+            try:
+                df_all_sections = load_sheet("Sections")
+                list_of_sections = df_all_sections['Section_Name'].unique().tolist()
+            except:
+                list_of_sections = []
+
+            if not list_of_sections:
+                st.warning("Please add a Section first in the previous tab! / يرجى إضافة شعبة أولاً من التبويب السابق")
+            else:
+                with st.form("add_student_form"):
+                    s_name = st.text_input("Full Name / الاسم الكامل")
+                    s_id = st.text_input("ID / الرقم التعريفي")
+                    s_sec = st.selectbox("Select Section / اختر الشعبة", list_of_sections)
+                    s_pass = st.text_input("Password / كلمة المرور", value=str(random.randint(1000, 9999)))
+                    
+                    if st.form_submit_button("Save Student / حفظ الطالب"):
+                        if s_name and s_id:
+                            try:
+                                new_s_df = pd.DataFrame([{
+                                    "ID": str(s_id).strip(),
+                                    "Name": str(s_name).strip(),
+                                    "Password": str(s_pass).strip(),
+                                    "Section": str(s_sec).strip()
+                                }])
+                                conn.create(worksheet="Students", data=new_s_df)
+                                st.success(f"Student {s_name} registered successfully!")
+                            except Exception as e:
+                                st.error(f"Write Error: Check service account permissions. / خطأ في الكتابة: تأكد من صلاحيات المحرر")
+                        else:
+                            st.error("Please fill all fields / يرجى ملء جميع الحقول")
     elif menu == "Exams Matrix":
         st.header("📊 Results Matrix")
         if not df_grades.empty:
