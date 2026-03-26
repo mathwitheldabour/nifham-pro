@@ -117,15 +117,33 @@ elif st.session_state.role == 'teacher':
     elif menu == "Exams Manager":
         st.header("Manage Exams")
         with st.form("add_exam"):
-            e_id = st.text_input("Exam ID")
-            e_ti = st.text_input("Title")
-            e_se = st.multiselect("Sections", all_sec)
-            e_du = st.number_input("Duration (Min)", value=60)
-            e_ht = st.text_area("HTML Template (Supports VAR_A, VAR_B)")
+            e_id = st.text_input("Exam ID (e.g., 5-1)")
+            e_ti = st.text_input("Exam Title")
+            
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                start_date = st.date_input("Start Date", datetime.now())
+                start_time = st.time_input("Start Time", datetime.now().time())
+            with col_t2:
+                end_date = st.date_input("End Date", datetime.now())
+                end_time = st.time_input("End Time", datetime.now().time())
+            
+            e_se = st.multiselect("Assign to Sections", all_sec)
+            e_du = st.number_input("Duration (Minutes)", value=60)
+            e_ht = st.text_area("HTML Template")
+            
             if st.form_submit_button("Publish Exam"):
-                new_ex = pd.DataFrame([{"Exam_ID": e_id, "Title": e_ti, "Section": ",".join(e_se), "Duration": e_du, "HTML_Code": e_ht, "Status": "Active"}])
+                # دمج التاريخ والوقت في نص واحد للتخزين
+                start_dt = f"{start_date} {start_time}"
+                end_dt = f"{end_date} {end_time}"
+                
+                new_ex = pd.DataFrame([{
+                    "Exam_ID": e_id, "Title": e_ti, "Section": ",".join(e_se), 
+                    "Duration": e_du, "HTML_Code": e_ht, "Status": "Active",
+                    "Start_Time": start_dt, "End_Time": end_dt
+                }])
                 conn.update(worksheet="Exams", data=pd.concat([df_exm, new_ex], ignore_index=True))
-                st.success("Published!"); st.rerun()
+                st.success("Exam Published with Schedule!"); st.rerun()
 
     elif menu == "System Settings":
         st.header("Settings")
@@ -166,11 +184,10 @@ elif st.session_state.role == 'student':
             # Dynamic Injection & LaTeX Fix
             html = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID'])).replace("STUDENT_NAME_HERE", str(u['Name']))
             if "VAR_A" in html:
-                random.seed(int(u['ID']) + int(ex['Exam_ID']))
-                html = html.replace("VAR_A", str(random.randint(2, 9))).replace("VAR_B", str(random.randint(2, 5)))
-                random.seed()
-            st.components.v1.html(html.replace("\\", "\\\\"), height=850, scrolling=True)
-            if st.button("Cancel & Exit"): st.session_state.exam = None; st.rerun()
+                seed_value = sum(ord(c) for c in (str(u['ID']) + str(ex['Exam_ID'])))
+                random.seed(seed_value)
+                st.components.v1.html(html.replace("\\", "\\\\"), height=850, scrolling=True)
+              if st.button("Cancel & Exit"): st.session_state.exam = None; st.rerun()
     else:
         st.title(f"Welcome, {u['Name']} 👋")
         if st.sidebar.button("Logout"): st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
