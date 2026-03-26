@@ -216,13 +216,58 @@ elif st.session_state.role == 'teacher':
                             st.error("Please fill all fields / يرجى ملء جميع الحقول")
                             
     # --- 3. مصفوفة النتائج ---
+# --- القسم الثالث: مصفوفة النتائج (المطور) ---
     elif menu == "Exams Matrix":
         st.header("📊 Results Matrix / مصفوفة النتائج")
-        if not df_grades.empty:
-            matrix = df_grades.pivot_table(index='Student_Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
-            st.dataframe(matrix.style.highlight_max(axis=0, color='lightgreen'), use_container_width=True)
+        
+        if not df_grades.empty and not df_students.empty:
+            # 1. فلتر اختيار الشعبة
+            available_sections = df_students['Section'].unique().tolist()
+            selected_section = st.selectbox("Select Section / اختر الشعبة", ["All / الجميع"] + available_sections)
+            
+            # 2. ربط بيانات الدرجات ببيانات الطلاب للحصول على "الشعبة" لكل درجة
+            # نقوم بدمج Grades مع Students بناءً على ID الطالب
+            df_merged = pd.merge(
+                df_grades, 
+                df_students[['ID', 'Section']], 
+                left_on='Student_ID', 
+                right_on='ID', 
+                how='left'
+            )
+            
+            # 3. تطبيق الفلترة حسب الشعبة المختارة
+            if selected_section != "All / الجميع":
+                df_filtered = df_merged[df_merged['Section'] == selected_section]
+            else:
+                df_filtered = df_merged
+
+            if not df_filtered.empty:
+                # 4. إنشاء المصفوفة (Pivot Table)
+                # الصفوف: Student_Name، الأعمدة: Exam_ID (أو Title)، القيم: Score
+                matrix = df_filtered.pivot_table(
+                    index='Student_Name', 
+                    columns='Exam_ID', 
+                    values='Score', 
+                    aggfunc='max' # في حال قدم الطالب أكثر من مرة نأخذ الدرجة الأعلى
+                )
+                
+                # ملء الفراغات (الطلاب الذين لم يختبروا) بكلمة "N/A" أو "-"
+                matrix = matrix.fillna('-')
+                
+                # 5. عرض المصفوفة بتنسيق جميل
+                st.markdown(f"**Showing results for: {selected_section}**")
+                st.dataframe(
+                    matrix.style.highlight_max(axis=0, color='lightgreen') # تمييز الدرجة الأعلى في كل امتحان
+                    .highlight_min(axis=0, color='#ffcccc') # تمييز الدرجة الأقل
+                    , use_container_width=True
+                )
+                
+                # إحصائية سريعة
+                st.caption(f"Number of students in view: {len(matrix)}")
+            else:
+                st.warning("No grades found for this section / لا توجد درجات مسجلة لهذه الشعبة")
         else:
-            st.info("No grades yet / لا توجد درجات مسجلة")
+            st.info("No grades or students found yet / لا توجد بيانات طلاب أو درجات حالياً")
 
     # --- 4. تحليل مستوى الطالب ---
     elif menu == "Student Analysis":
