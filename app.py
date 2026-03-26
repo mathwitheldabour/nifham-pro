@@ -179,156 +179,148 @@ elif st.session_state.role == 'teacher':
                     conn.update(worksheet="Students", data=pd.concat([old, pd.DataFrame([{"ID": si, "Name": sn, "Password": sp, "Section": ss}])], ignore_index=True))
                     st.success("Registered!"); time.sleep(1); st.rerun()
 
-# --- 6. Student Dashboard (Updated) ---
+# --- 6. Student Dashboard ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    df_ex_stu = clean_data(load_sheet("Exams"))
-    df_gr_stu = clean_data(load_sheet("Grades"))
-    my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
+    
+    # تحميل البيانات اللازمة
+    with st.spinner("Loading your data..."):
+        df_ex_stu = clean_data(load_sheet("Exams"))
+        df_gr_stu = clean_data(load_sheet("Grades"))
+        # تصفية درجات الطالب الحالي فقط
+        my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
 
+    # --- الجزء الأول: مشغل الامتحان (يظهر فقط عند بدء امتحان) ---
     if st.session_state.exam is not None:
-        # مشغل الامتحان (نفس المنطق السابق مع استبدال الاسم والـ ID)
         ex = st.session_state.exam
         st.subheader(f"Exam: {ex['Title']}")
-        elapsed = time.time() - st.session_state.start_t
-        rem = (int(float(ex.get('Duration', 60))) * 60) - elapsed
+        st.markdown(f"<span class='arabic-sub'>الاختبار النشط: {ex['Title']}</span>", unsafe_allow_html=True)
         
-        if rem <= 0:
-            st.error("Time Up!"); st.session_state.exam = None; st.rerun()
+        # حساب التوقيت
+        elapsed = time.time() - st.session_state.start_t
+        duration_sec = int(float(ex.get('Duration', 60))) * 60
+        remaining = duration_sec - elapsed
+        
+        if remaining <= 0:
+            st.error("Time is Up! / انتهى وقت الاختبار")
+            if st.button("Back to Dashboard"):
+                st.session_state.exam = None
+                st.rerun()
         else:
-            m, s = divmod(int(rem), 60)
+            # عرض عداد الوقت
+            m, s = divmod(int(remaining), 60)
             st.markdown(f'<div class="timer-box">{m:02d}:{s:02d}</div>', unsafe_allow_html=True)
-            # الحقن الديناميكي للبيانات
-            html_content = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID'])).replace("STUDENT_NAME_HERE", str(u['Name']))
-            st.components.v1.html(html_content, height=850, scrolling=True)
-            if st.button("Exit"): st.session_state.exam = None; st.rerun()
-
-    else:
-        st.title(f"Welcome, {u['Name']} 👋")
-        tab1, tab2, tab3 = st.tabs(["📋 Pending", "✅ Grades", "📊 Performance"])
-
-        with tab1:
-            # عرض الاختبارات المتاحة
-            required = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
-            taken_ids = my_grades['Exam_ID'].unique().tolist()
-            required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_ids))]
             
-            for _, ex_row in required.iterrows():
-                st.markdown(f'<div class="exam-card"><b>{ex_row["Title"]}</b></div>', unsafe_allow_html=True)
-                if st.button(f"Start Exam", key=ex_row['Exam_ID']):
-                    st.session_state.exam = ex_row.to_dict()
-                    st.session_state.start_t = time.time(); st.rerun()
-
-        with tab2:
-            st.subheader("Your Grades")
-            st.table(my_grades[['Exam_ID', 'Score']])
+            # حقن بيانات الطالب في الـ HTML قبل العرض
+            final_html = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID']))
+            final_html = final_html.replace("STUDENT_NAME_HERE", str(u['Name']))
             
-            st.divider()
-            st.subheader("💡 Smart Practice")
-            # الزر الموحد لإنشاء التدريب
-            if st.button("Generate Similar Practice / تدرب على أفكار مشابهة"):
-                if not df_ex_stu.empty and not my_grades.empty:
-                    last_id = my_grades.iloc[-1]['Exam_ID']
-                    template = df_ex_stu[df_ex_stu['Exam_ID'] == last_id].iloc[0]['HTML_Code']
-                    
-                    # توليد أرقام عشوائية
-                    a, b = random.randint(2, 10), random.randint(1, 8)
-                    
-                    # استبدال المتغيرات في القالب
-                    rendered = str(template).replace("VAR_A", str(a)).replace("VAR_B", str(b))
-                    rendered = rendered.replace("STUDENT_NAME_HERE", "Practice Mode").replace("STUDENT_ID_HERE", "---")
-                    
-                    st.session_state.practice_mode = rendered
+            # عرض نافذة الامتحان
+            st.components.v1.html(final_html, height=800, scrolling=True)
+            
+            st.warning("Do not refresh the page during the exam! / لا تقم بتحديث الصفحة أثناء الاختبار")
+            if st.button("Exit Exam / خروج"):
+                if st.checkbox("Confirm Exit / تأكيد الخروج"):
+                    st.session_state.exam = None
                     st.rerun()
 
-            if 'practice_mode' in st.session_state:
-                st.info("Dynamic Practice Mode Active")
-                st.components.v1.html(st.session_state.practice_mode, height=800, scrolling=True)
-                if st.button("Close Practice"): del st.session_state.practice_mode; st.rerun()
-    # --- PART 2: Main Dashboard ---
+    # --- الجزء الثاني: اللوحة الرئيسية للطالب ---
     else:
         st.title(f"Welcome, {u['Name']} 👋")
-        st.markdown(f"<span class='arabic-sub'>مرحباً بك، {u['Name']} | شعبة: {u['Section']}</span>", unsafe_allow_html=True)
+        st.markdown(f"<span class='arabic-sub'>مرحباً بك، {u['Name']} | الشعبة: {u['Section']}</span>", unsafe_allow_html=True)
         
-        if st.sidebar.button("Logout / خروج"):
+        # قائمة جانبية للخروج
+        if st.sidebar.button("Log out"):
             st.session_state.update({'auth': False, 'user': None, 'role': None})
             st.rerun()
 
+        # التبويبات (Tabs)
         tab1, tab2, tab3 = st.tabs(["📋 Assigned Exams", "✅ Grade History", "📊 Analytics"])
 
-        # Tab 1: الاختبارات المطلوبة
+        # التبويب الأول: الاختبارات المطلوبة
         with tab1:
             st.subheader("Pending Exams")
             if not df_ex_stu.empty:
+                # تصفية: نشط + شعبة الطالب + لم يتم حله سابقاً
                 required = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
                 taken_ids = my_grades['Exam_ID'].unique().tolist()
                 required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_ids))]
 
                 if required.empty:
-                    st.success("No exams pending! / لا توجد اختبارات مطلوبة")
+                    st.success("All caught up! No pending exams. / لا توجد اختبارات مطلوبة")
                 else:
                     for _, ex_row in required.iterrows():
                         with st.container():
-                            st.markdown(f'<div class="exam-card"><b>{ex_row["Title"]}</b></div>', unsafe_allow_html=True)
-                            if st.button(f"Start Exam / بدء", key=ex_row['Exam_ID']):
+                            st.markdown(f"""
+                            <div class="exam-card">
+                                <strong>{ex_row['Title']}</strong><br/>
+                                <small>Duration: {ex_row['Duration']} Minutes</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            if st.button(f"Start: {ex_row['Title']}", key=f"btn_{ex_row['Exam_ID']}"):
                                 st.session_state.exam = ex_row.to_dict()
                                 st.session_state.start_t = time.time()
                                 st.rerun()
+            else:
+                st.info("No exams available currently.")
 
-        # Tab 2: السجل والتدريب الذكي (الزر الموحد)
+        # التبويب الثاني: سجل الدرجات + التدريب الذكي (Smart Practice)
         with tab2:
-            st.subheader("Your Grades")
+            st.subheader("Your Progress")
             if not my_grades.empty:
                 st.table(my_grades[['Exam_ID', 'Score']])
                 
                 st.divider()
                 st.subheader("💡 Smart Practice")
-                st.markdown("<span class='arabic-sub'>التدريب الذكي: تدرب على أفكار مشابهة للاختبارات السابقة بنفس التنسيق</span>", unsafe_allow_html=True)
-
-                # الزر الموحد للتوليد
-                if st.button("Generate Practice / إنشاء تدريب جديد"):
-                    if not df_ex_stu.empty:
-                        # نأخذ آخر اختبار أداه الطالب كقالب
-                        last_exam_id = my_grades.iloc[-1]['Exam_ID']
-                        template_html = df_ex_stu[df_ex_stu['Exam_ID'] == last_exam_id].iloc[0]['HTML_Code']
+                st.markdown("<span class='arabic-sub'>تدرب على أفكار مشابهة للاختبارات التي خضتها</span>", unsafe_allow_html=True)
+                
+                # الزر الموحد للتدريب
+                if st.button("Generate Practice / إنشاء تدريب ذكي"):
+                    # نستخدم آخر اختبار قدمه الطالب كنموذج (Template)
+                    last_exam_id = my_grades.iloc[-1]['Exam_ID']
+                    exam_data = df_ex_stu[df_ex_stu['Exam_ID'] == last_exam_id]
+                    
+                    if not exam_data.empty:
+                        html_template = str(exam_data.iloc[0]['HTML_Code'])
+                        # توليد أرقام عشوائية (مثال للمشتقاتVAR_A, VAR_B)
+                        v1, v2 = random.randint(2, 9), random.randint(2, 5)
                         
-                        # توليد أرقام عشوائية (مثال لمعادلة ax + b = c)
-                        a, x, b = random.randint(2, 10), random.randint(1, 12), random.randint(1, 20)
-                        c = (a * x) + b
+                        # استبدال المتغيرات في القالب
+                        practice_html = html_template.replace("VAR_A", str(v1)).replace("VAR_B", str(v2))
+                        practice_html = practice_html.replace("STUDENT_NAME_HERE", "Practice Mode")
                         
-                        # استبدال المتغيرات في كود الـ HTML
-                        rendered = str(template_html).replace("VAR_A", str(a)).replace("VAR_B", str(b)).replace("VAR_C", str(c))
-                        
-                        # تخزين في الجلسة
-                        st.session_state.smart_practice = {"html": rendered, "ans": x}
+                        # تخزين التدريب في الجلسة لعرضه
+                        st.session_state.practice_view = practice_html
                         st.rerun()
 
-                # عرض التدريب فقط إذا تم توليده
-                if 'smart_practice' in st.session_state:
-                    with st.container():
-                        st.markdown("---")
-                        # عرض التصميم الأصلي للاختبار
-                        st.components.v1.html(st.session_state.smart_practice['html'], height=350, scrolling=True)
-                        
-                        # خانة الإجابة والتحقق (بشكل مدمج)
-                        ans_input = st.number_input("Enter Answer / ضع إجابتك هنا", key="practice_ans_val")
-                        if st.button("Check Result / تحقق"):
-                            if ans_input == st.session_state.smart_practice['ans']:
-                                st.success("Correct! Well done. / إجابة صحيحة، أحسنت!")
-                                # إخفاء التدريب بعد النجاح إذا أردت
-                                # del st.session_state.smart_practice 
-                            else:
-                                st.error(f"Try Again! / حاول مرة أخرى")
+                # عرض التدريب إذا تم إنشاؤه
+                if 'practice_view' in st.session_state:
+                    st.info("Custom Practice Generated Based on your Previous Exams")
+                    st.components.v1.html(st.session_state.practice_view, height=600, scrolling=True)
+                    if st.button("Close Practice / إغلاق"):
+                        del st.session_state.practice_view
+                        st.rerun()
             else:
-                st.info("No grade history found.")
+                st.info("Complete an exam first to unlock Smart Practice!")
 
-        # Tab 3: التحليلات
+        # التبويب الثالث: تحليلات الأداء (الرسومات البيانية)
         with tab3:
-            st.subheader("Performance Progress")
+            st.subheader("Performance Metrics")
             if not my_grades.empty:
-                fig = px.line(my_grades, x='Exam_ID', y='Score', title="My Progress", markers=True)
+                # رسم بياني لتطور الدرجات باستخدام Plotly
+                fig = px.line(my_grades, x='Exam_ID', y='Score', 
+                             title='Score Progress / تطور الدرجات',
+                             markers=True, line_shape="spline")
                 fig.update_layout(yaxis_range=[0, 105])
                 st.plotly_chart(fig, use_container_width=True)
+                
+                avg_score = my_grades['Score'].mean()
+                st.metric("Overall Average", f"{avg_score:.1f}%")
+            else:
+                st.warning("No data available for analytics yet.")
+
+# --- نهاية كود الطالب ---
+
 # --- 7. Final Protection (The "Catch-All") ---
 # هذا الجزء يضمن عدم ظهور أي شيء إذا لم يتم تسجيل الدخول
 elif not st.session_state.auth:
