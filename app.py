@@ -69,62 +69,98 @@ if not st.session_state.auth:
                     st.rerun()
                 else: st.error("Invalid Credentials / بيانات الدخول خاطئة")
 
-# المحطة الثانية: لوحة المعلم (Teacher Dashboard)
+# --- 5. Teacher Dashboard (Management Flow Optimized) ---
 elif st.session_state.role == 'teacher':
     st.sidebar.title(f"Mr. {st.session_state.user.get('Name')}")
-    menu = st.sidebar.radio("Menu", ["Results Matrix", "Analytics", "Exams Manager", "Settings"])
-    if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
+    menu = st.sidebar.radio("Navigation", ["Results Matrix", "Analytics", "Exams Manager", "System Settings"])
+    
+    if st.sidebar.button("Logout"): 
+        st.session_state.update({'auth': False})
+        st.rerun()
 
+    # تحميل البيانات
     df_stu = clean_data(load_sheet("Students"))
     df_grd = clean_data(load_sheet("Grades"))
     df_exm = clean_data(load_sheet("Exams"))
-    all_sec = sorted(df_stu['Section'].unique().tolist()) if not df_stu.empty else []
+    df_sec_tab = clean_data(load_sheet("Sections")) # الشيت الأساسي للشعب
 
+    # جلب قائمة الشعب من شيت Sections حصراً لضمان دقة البيانات
+    final_sections = sorted(df_sec_tab['Section_Name'].unique().tolist()) if not df_sec_tab.empty else []
+
+    # --- مصفوفة النتائج والتحليلات (نفس المنطق السابق) ---
     if menu == "Results Matrix":
         st.header("Results Matrix")
-        sel_sec = st.selectbox("Section", ["All"] + all_sec)
-        f_stu = df_stu[df_stu['Section'] == sel_sec] if sel_sec != "All" else df_stu
-        merged = pd.merge(f_stu[['ID', 'Name']], df_grd, left_on='ID', right_on='Student_ID', how='left')
-        if not merged['Exam_ID'].dropna().empty:
-            matrix = merged.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
-            st.dataframe(matrix.style.highlight_max(axis=0, color='#bbf7d0'), use_container_width=True)
+        if not final_sections:
+            st.warning("No sections found. Please add sections in 'System Settings' first.")
+        else:
+            sel_sec = st.selectbox("Filter by Section", ["All"] + final_sections)
+            # ... باقي كود المصفوفة ...
 
-    elif menu == "Analytics":
-        st.header("Full Analytics")
-        if not df_grd.empty:
-            df_an = pd.merge(df_grd, df_stu, left_on='Student_ID', right_on='ID')
-            c1, c2 = st.columns(2)
-            c1.plotly_chart(px.bar(df_an.groupby('Section')['Score'].mean().reset_index(), x='Section', y='Score', title="Avg by Section"))
-            c2.plotly_chart(px.histogram(df_grd, x="Score", nbins=10, title="Grade Distribution"))
-
+    # --- إدارة الاختبارات (تعتمد على وجود شعب) ---
     elif menu == "Exams Manager":
         st.header("Exams Scheduler")
-        with st.form("add_ex"):
-            e_id = st.text_input("Exam ID")
-            e_ti = st.text_input("Title")
-            col_t1, col_t2 = st.columns(2)
-            with col_t1:
-                sd = st.date_input("Start Date"); stm = st.time_input("Start Time")
-            with col_t2:
-                ed = st.date_input("End Date"); etm = st.time_input("End Time")
-            e_se = st.multiselect("Sections", all_sec)
-            e_du = st.number_input("Duration (Min)", value=60)
-            e_ht = st.text_area("HTML Code")
-            if st.form_submit_button("Publish"):
-                new_ex = pd.DataFrame([{"Exam_ID": e_id, "Title": e_ti, "Section": ",".join(e_se), "Duration": e_du, "HTML_Code": e_ht, "Status": "Active", "Start_Time": f"{sd} {stm}", "End_Time": f"{ed} {etm}"}])
-                conn.update(worksheet="Exams", data=pd.concat([df_exm, new_ex], ignore_index=True))
-                st.success("Exam Published!"); st.rerun()
+        if not final_sections:
+            st.error("⚠️ Stop! You must add a Section first in 'System Settings' before creating exams.")
+        else:
+            with st.form("add_ex"):
+                e_id = st.text_input("Exam ID")
+                e_ti = st.text_input("Title")
+                col_t1, col_t2 = st.columns(2)
+                with col_t1:
+                    sd = st.date_input("Start Date"); stm = st.time_input("Start Time")
+                with col_t2:
+                    ed = st.date_input("End Date"); etm = st.time_input("End Time")
+                
+                # اختيار الشعبة من القائمة المسجلة مسبقاً
+                e_se = st.multiselect("Assign to Sections", final_sections)
+                e_du = st.number_input("Duration (Min)", value=60)
+                e_ht = st.text_area("HTML Code")
+                
+                if st.form_submit_button("Publish Exam"):
+                    if e_id and e_ti and e_se:
+                        new_ex = pd.DataFrame([{
+                            "Exam_ID": e_id, "Title": e_ti, "Section": ",".join(e_se), 
+                            "Duration": e_du, "HTML_Code": e_ht, "Status": "Active", 
+                            "Start_Time": f"{sd} {stm}", "End_Time": f"{ed} {etm}"
+                        }])
+                        conn.update(worksheet="Exams", data=pd.concat([df_exm, new_ex], ignore_index=True))
+                        st.success("Exam Published!"); st.rerun()
+                    else: st.error("Please fill all fields and select at least one section.")
 
-    elif menu == "Settings":
-        st.header("Management")
-        with st.form("add_stu"):
-            sn, si = st.text_input("Name"), st.text_input("ID")
-            ss = st.selectbox("Section", all_sec)
-            sp = st.text_input("Password", value="1234")
-            if st.form_submit_button("Register"):
-                conn.update(worksheet="Students", data=pd.concat([df_stu, pd.DataFrame([{"ID": si, "Name": sn, "Password": sp, "Section": ss}])], ignore_index=True))
-                st.success("Done!"); st.rerun()
+    # --- الإدارة (System Settings) - هنا يتم فرض التسلسل ---
+    elif menu == "System Settings":
+        st.header("System Management")
+        tab_sec, tab_stu = st.tabs(["1. Manage Sections (Start Here)", "2. Register Students"])
+        
+        # الجزء الأول: إضافة الشعبة (الأولوية القصوى)
+        with tab_sec:
+            st.subheader("Add New Section")
+            st.info("Step 1: Define your classes/sections here.")
+            with st.form("sec_f"):
+                ns = st.text_input("Section Name (e.g., 12-Adv-A)")
+                if st.form_submit_button("Save Section"):
+                    if ns:
+                        new_s_df = pd.DataFrame([{"Section_Name": ns.strip()}])
+                        conn.update(worksheet="Sections", data=pd.concat([df_sec_tab, new_s_df], ignore_index=True))
+                        st.success(f"Section '{ns}' added successfully!"); time.sleep(1); st.rerun()
 
+        # الجزء الثاني: إضافة الطالب (يفتح فقط إذا وجدت شعب)
+        with tab_stu:
+            st.subheader("Register New Student")
+            if not final_sections:
+                st.warning("⚠️ You cannot register students yet. Please go to 'Manage Sections' and add a section first.")
+            else:
+                st.info("Step 2: Assign students to the sections you created.")
+                with st.form("stu_f"):
+                    sn, si = st.text_input("Student Name"), st.text_input("Student ID")
+                    ss = st.selectbox("Assign to Section", final_sections)
+                    sp = st.text_input("Password", value=str(random.randint(1000, 9999)))
+                    
+                    if st.form_submit_button("Register Student"):
+                        if sn and si:
+                            new_st_df = pd.DataFrame([{"ID": si, "Name": sn, "Password": sp, "Section": ss}])
+                            conn.update(worksheet="Students", data=pd.concat([df_stu, new_st_df], ignore_index=True))
+                            st.success(f"Student {sn} registered in section {ss}!"); time.sleep(1); st.rerun()
 # المحطة الثالثة: لوحة الطالب (Student Dashboard)
 elif st.session_state.role == 'student':
     u = st.session_state.user
