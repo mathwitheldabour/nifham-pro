@@ -266,9 +266,9 @@ elif st.session_state.role == 'student':
         if remaining <= 0:
             st.error("⚠️ انتهى الوقت!")
             if st.button("خروج"): st.session_state.exam = None; st.rerun()
-        else:
+       
             # --- 7. مشغل الامتحان المطور (بدون إدخال يدوي) ---
-    else:
+        else:
         ex = st.session_state.exam
         
         # زر العودة للرئيسية
