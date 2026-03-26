@@ -111,23 +111,88 @@ elif st.session_state.role == 'teacher':
     # --- إدارة الشعب والطلاب ---
     elif menu == "Management":
         st.header("⚙️ Management / الإدارة")
-        t1, t2 = st.tabs(["Add Section / إضافة شعبة", "Add Student / إضافة طالب"])
-        with t1:
-            with st.form("sec"):
-                n_s = st.text_input("Section Name")
-                if st.form_submit_button("Save"):
-                    conn.create(worksheet="Sections", data=pd.DataFrame([{"Section_Name": n_s}]))
-                    st.success("Done!"); time.sleep(1); st.rerun()
-        with t2:
-            with st.form("stu"):
-                s_n = st.text_input("Student Name")
-                s_i = st.text_input("Student ID")
-                s_s = st.selectbox("Section", available_sections)
-                s_p = st.text_input("Password", value=str(random.randint(1000, 9999)))
-                if st.form_submit_button("Register"):
-                    conn.create(worksheet="Students", data=pd.DataFrame([{"ID": s_i, "Name": s_n, "Password": s_p, "Section": s_s}]))
-                    st.success("Registered!"); time.sleep(1); st.rerun()
+        tab1, tab2 = st.tabs(["Add Section / إضافة شعبة", "Add Student / إضافة طالب"])
+        
+        # --- 1. جلب الشعب من كل المصادر (القديم والجديد) ---
+        all_found_sections = set()
+        # أولاً: من شيت الطلاب (البيانات الأصلية)
+        if not df_students.empty and 'Section' in df_students.columns:
+            all_found_sections.update(df_students['Section'].dropna().unique().tolist())
+        # ثانياً: من شيت الشعب (اللي أضفتها يدوي)
+        try:
+            df_sec_tab = load_sheet("Sections")
+            if not df_sec_tab.empty:
+                all_found_sections.update(df_sec_tab['Section_Name'].dropna().unique().tolist())
+        except:
+            pass
+        
+        final_sections_list = sorted([str(s) for s in all_found_sections if str(s).strip() != ""])
 
+        # --- تبويب إضافة شعبة ---
+        with tab1:
+            st.subheader("Create New Section")
+            with st.form("sec_form_new"):
+                new_sec_name = st.text_input("New Section Name")
+                if st.form_submit_button("Save Section"):
+                    if new_sec_name:
+                        try:
+                            # تحديث شيت Sections
+                            try: curr_sec_df = load_sheet("Sections")
+                            except: curr_sec_df = pd.DataFrame(columns=["Section_Name"])
+                            
+                            new_s_row = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
+                            updated_sec_df = pd.concat([curr_sec_df, new_s_row], ignore_index=True)
+                            conn.update(worksheet="Sections", data=updated_sec_df)
+                            st.success(f"Section '{new_sec_name}' Added!")
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
+        # --- تبويب إضافة طالب (تم إصلاح التعليق والإضافة) ---
+        with tab2:
+            st.subheader("Register New Student")
+            if not final_sections_list:
+                st.warning("No sections found in Excel or App! / لم يتم العثور على شعب")
+            else:
+                with st.form("stu_form_new"):
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        s_name = st.text_input("Student Name")
+                        s_id = st.text_input("Student ID (Unique)")
+                    with col_b:
+                        s_sec = st.selectbox("Select Section", final_sections_list)
+                        # كلمة سر عشوائية
+                        random_p = str(random.randint(1000, 9999))
+                        s_pass = st.text_input("Password", value=random_p)
+                    
+                    if st.form_submit_button("Register Student"):
+                        if s_name and s_id:
+                            try:
+                                # قراءة الطلاب الحاليين للإضافة عليهم (Appending)
+                                try: curr_stu_df = load_sheet("Students")
+                                except: curr_stu_df = pd.DataFrame(columns=["ID", "Name", "Password", "Section"])
+                                
+                                # تنظيف البيانات قبل الإضافة
+                                new_stu = pd.DataFrame([{
+                                    "ID": str(s_id).strip(),
+                                    "Name": str(s_name).strip(),
+                                    "Password": str(s_pass).strip(),
+                                    "Section": str(s_sec).strip()
+                                }])
+                                
+                                # الدمج والحفظ
+                                updated_stu_all = pd.concat([curr_stu_df, new_stu], ignore_index=True)
+                                conn.update(worksheet="Students", data=updated_stu_all)
+                                
+                                st.success(f"Student {s_name} added successfully!")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error saving student: {e}")
+                        else:
+                            st.error("Please fill Name and ID")
+                            
     # --- إضافة اختبار جديد ---
     elif menu == "Add Exam":
         st.header("📝 Add New Exam")
