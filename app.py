@@ -295,6 +295,49 @@ elif st.session_state.role == 'student':
             else:
                 st.info("You haven't completed any exams yet.")
 
+        # --- وظيفة داخل كود الطالب (Tab 2) ---
+
+if st.button("Generate Similar Practice / تدرب على نفس التنسيق"):
+    # 1. جلب كود الـ HTML الأصلي للاختبار (كمثال لأول اختبار مسجل)
+    if not my_grades.empty:
+        last_exam_id = my_grades.iloc[-1]['Exam_ID']
+        exam_template = df_ex_stu[df_ex_stu['Exam_ID'] == last_exam_id].iloc[0]['HTML_Code']
+        
+        # 2. توليد أرقام عشوائية متناسقة رياضياً
+        val_a = random.randint(2, 10)
+        val_x = random.randint(1, 12) # الإجابة الصحيحة المخفية
+        val_b = random.randint(1, 20)
+        val_c = (val_a * val_x) + val_b
+        
+        # 3. عملية "الحقن": استبدال الكلمات المحجوزة بالأرقام المولدة
+        rendered_html = str(exam_template).replace("VAR_A", str(val_a))
+        rendered_html = rendered_html.replace("VAR_B", str(val_b))
+        rendered_html = rendered_html.replace("VAR_C", str(val_c))
+        
+        # 4. تخزين النتيجة في الجلسة لعرضها
+        st.session_state.practice_html = rendered_html
+        st.session_state.practice_answer = val_x
+        st.rerun()
+
+# --- عرض الامتحان التدريبي بنفس التنسيق ---
+if 'practice_html' in st.session_state:
+    st.divider()
+    st.info("Dynamic Practice Mode / وضع التدريب الديناميكي")
+    
+    # عرض الـ HTML بنفس تنسيق الامتحان تماماً
+    st.components.v1.html(st.session_state.practice_html, height=400, scrolling=True)
+    
+    # إضافة خانة التحقق برمجياً أسفل الـ HTML
+    ans_col1, ans_col2 = st.columns([3, 1])
+    with ans_col1:
+        u_input = st.number_input("Enter your answer here to check:", key="dyn_input")
+    with ans_col2:
+        if st.button("Verify / تحقق"):
+            if u_input == st.session_state.practice_answer:
+                st.success("Correct! / إجابة صحيحة")
+            else:
+                st.error(f"Wrong! Correct is {st.session_state.practice_answer}")
+
         # 3. تحليل الأداء
         with tab3:
             st.subheader("Learning Progress")
