@@ -149,68 +149,164 @@ elif st.session_state.role == 'teacher':
 # --- 6. لوحة الطالب (Student Dashboard) ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    df_ex_stu = clean_data(load_sheet("Exams"))
-    df_gr_stu = clean_data(load_sheet("Grades"))
-    my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
+    
+    # --- 1. تحميل وتجهيز البيانات ---
+    with st.spinner("Syncing your dashboard..."):
+        df_ex_stu = clean_data(load_sheet("Exams"))
+        df_gr_stu = clean_data(load_sheet("Grades"))
+        my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
 
+    # --- 2. مشغل الامتحان (Exam Runner Mode) ---
     if st.session_state.exam is not None:
-        # مشغل الامتحان
         ex = st.session_state.exam
         st.subheader(f"Exam: {ex['Title']}")
-        rem = (int(float(ex.get('Duration', 60))) * 60) - (time.time() - st.session_state.start_t)
-        if rem <= 0:
-            st.error("Time Expired!"); st.session_state.exam = None; st.rerun()
+        
+        # منطق التوقيت (Timer Logic)
+        elapsed = time.time() - st.session_state.start_t
+        duration_sec = int(float(ex.get('Duration', 60))) * 60
+        remaining = duration_sec - elapsed
+        
+        if remaining <= 0:
+            st.error("Time Expired! / انتهى الوقت المحدد")
+            if st.button("Close and Exit"):
+                st.session_state.exam = None
+                st.rerun()
         else:
-            m, s = divmod(int(rem), 60)
-            st.markdown(f'<div class="timer-box">{m:02d}:{s:02d}</div>', unsafe_allow_html=True)
-            # الحقن الذكي وعلاج الرموز الرياضية
-            html_raw = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID'])).replace("STUDENT_NAME_HERE", str(u['Name']))
-            if "VAR_A" in html_raw:
-                seed_val = sum(ord(c) for c in (str(u['ID']) + str(ex['Exam_ID'])))
-                random.seed(seed_val)
-                html_raw = html_raw.replace("VAR_A", str(random.randint(2, 9))).replace("VAR_B", str(random.randint(2, 5)))
-                random.seed()
-            st.components.v1.html(html_raw.replace("\\", "\\\\"), height=850, scrolling=True)
-            if st.button("Cancel & Exit"): st.session_state.exam = None; st.rerun()
+            # عرض عداد الوقت
+            mins, secs = divmod(int(remaining), 60)
+            st.markdown(f'<div class="timer-box">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+            
+            # --- معالجة وحقن البيانات (The Smart Injection) ---
+            html_content = str(ex['HTML_Code'])
+            
+            # استبدال بيانات الهوية
+            html_content = html_content.replace("STUDENT_ID_HERE", str(u['ID']))
+            html_content = html_content.replace("STUDENT_NAME_HERE", str(u['Name']))
+            html_content = html_content.replace("EXAM_ID_HERE", str(ex['Exam_ID']))
+            
+            # توليد أرقام عشوائية ثابتة (Smart Seeding)
+            # نستخدم مجموع قيم ASCII للمعرفات لضمان رقم صحيح دائماً
+            if "VAR_A" in html_content:
+                safe_seed = sum(ord(c) for c in (str(u['ID']) + str(ex['Exam_ID'])))
+                random.seed(safe_seed)
+                # مثال لاستبدال المتغيرات (يمكنك إضافة المزيد حسب حاجتك)
+                html_content = html_content.replace("VAR_A", str(random.randint(2, 9)))
+                html_content = html_content.replace("VAR_B", str(random.randint(2, 5)))
+                random.seed() # إعادة تصفير البذرة للنظام العام
+
+            # --- الحل النهائي لمشكلة المعادلات (LaTeX Fix) ---
+            # نحول كل \ إلى \\ لكي تصل للمتصفح بشكل سليم ويفهمها MathJax
+            html_final = html_content.replace("\\", "\\\\")
+            
+            # عرض المكون البرمجي للاختبار
+            st.components.v1.html(html_final, height=850, scrolling=True)
+            
+            st.warning("⚠️ Do not refresh! / لا تقم بتحديث الصفحة أثناء الحل.")
+            if st.button("Exit Without Saving / خروج"):
+                st.session_state.exam = None
+                st.rerun()
+
+    # --- 3. اللوحة الرئيسية (Dashboard Mode) ---
     else:
         st.title(f"Welcome, {u['Name']} 👋")
-        if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
-
-        t1, t2, t3 = st.tabs(["📋 Assigned", "✅ Grades", "📊 Performance"])
-        with t1:
-            st.subheader("Pending Exams")
-            now = datetime.now()
-            req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
-            taken = my_grades['Exam_ID'].unique().tolist()
-            req = req[~req['Exam_ID'].astype(str).isin(map(str, taken))]
-            
-            for _, r in req.iterrows():
-                try:
-                    st_t = datetime.strptime(str(r['Start_Time']), '%Y-%m-%d %H:%M:%S')
-                    en_t = datetime.strptime(str(r['End_Time']), '%Y-%m-%d %H:%M:%S')
-                except: st_t = en_t = now
-                if st_t <= now <= en_t:
-                    st.markdown(f'<div class="exam-card"><b>{r["Title"]}</b></div>', unsafe_allow_html=True)
-                    if st.button("Start Exam", key=r['Exam_ID']):
-                        st.session_state.exam = r.to_dict(); st.session_state.start_t = time.time(); st.rerun()
-
-        with t2:
-            st.table(my_grades[['Exam_ID', 'Score']])
-            if st.button("Generate Smart Practice"):
-                if not my_grades.empty:
-                    last_ex_row = df_ex_stu[df_ex_stu['Exam_ID'] == my_grades.iloc[-1]['Exam_ID']]
-                    if not last_ex_row.empty:
-                        tmpl = str(last_ex_row.iloc[0]['HTML_Code'])
-                        st.session_state.practice_mode = tmpl.replace("VAR_A", str(random.randint(2,9))).replace("VAR_B", str(random.randint(2,5))).replace("\\", "\\\\")
-                        st.rerun()
-            if 'practice_mode' in st.session_state:
-                st.components.v1.html(st.session_state.practice_mode, height=600, scrolling=True)
-                if st.button("Close Practice"): del st.session_state.practice_mode; st.rerun()
+        st.markdown(f"<span class='arabic-sub'>مرحباً بك، {u['Name']} | شعبة: {u['Section']}</span>", unsafe_allow_html=True)
         
-        with t3:
-            if not my_grades.empty:
-                st.plotly_chart(px.line(my_grades, x='Exam_ID', y='Score', markers=True))
+        if st.sidebar.button("Logout"):
+            st.session_state.update({'auth': False, 'user': None, 'role': None})
+            st.rerun()
 
+        # التبويبات الثلاثة الرئيسية
+        tab1, tab2, tab3 = st.tabs(["📋 Assigned Exams", "✅ Grade History", "📊 My Progress"])
+
+        # التبويب الأول: الاختبارات المتاحة حالياً
+        with tab1:
+            st.subheader("Current Assignments")
+            now = datetime.now()
+            
+            if not df_ex_stu.empty:
+                # فلترة: نشط + الشعبة مطابقة + لم يتم حله سابقاً
+                req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
+                taken = my_grades['Exam_ID'].unique().tolist()
+                req = req[~req['Exam_ID'].astype(str).isin(map(str, taken))]
+
+                found_exams = 0
+                for _, row in req.iterrows():
+                    # فحص نافذة الوقت (بداية ونهاية)
+                    try:
+                        st_dt = datetime.strptime(str(row['Start_Time']), '%Y-%m-%d %H:%M:%S')
+                        en_dt = datetime.strptime(str(row['End_Time']), '%Y-%m-%d %H:%M:%S')
+                    except:
+                        st_dt = en_dt = now # لو البيانات غير مكتملة نعتبره متاح
+
+                    if st_dt <= now <= en_dt:
+                        found_exams += 1
+                        with st.container():
+                            st.markdown(f"""
+                            <div class="exam-card">
+                                <strong>{row['Title']}</strong><br/>
+                                <small>Ends at: {en_dt.strftime('%I:%M %p')} on {en_dt.strftime('%d %b')}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            if st.button(f"Start: {row['Title']}", key=f"btn_{row['Exam_ID']}"):
+                                st.session_state.exam = row.to_dict()
+                                st.session_state.start_t = time.time()
+                                st.rerun()
+                    elif now < st_dt:
+                        st.info(f"Upcoming: {row['Title']} (Starts at {st_dt.strftime('%I:%M %p')})")
+
+                if found_exams == 0:
+                    st.success("You are all caught up! No active exams. / لا توجد اختبارات مطلوبة حالياً")
+            else:
+                st.info("No exams published yet.")
+
+        # التبويب الثاني: السجل والتدريب الذكي
+        with tab2:
+            st.subheader("Your Scores")
+            if not my_grades.empty:
+                st.dataframe(my_grades[['Exam_ID', 'Score']].sort_index(ascending=False), use_container_width=True)
+                
+                st.divider()
+                st.subheader("💡 Smart Practice")
+                st.write("Ready for more? Generate a new practice based on your last exam.")
+                
+                if st.button("Generate Smart Practice / تدريب ذكي"):
+                    # نستخدم آخر اختبار تم حله كقالب (Template)
+                    last_id = my_grades.iloc[-1]['Exam_ID']
+                    tmpl_row = df_ex_stu[df_ex_stu['Exam_ID'] == last_id]
+                    
+                    if not tmpl_row.empty:
+                        tmpl_html = str(tmpl_row.iloc[0]['HTML_Code'])
+                        # توليد أرقام عشوائية جديدة للتدريب
+                        v1, v2 = random.randint(2, 9), random.randint(2, 5)
+                        practice_html = tmpl_html.replace("VAR_A", str(v1)).replace("VAR_B", str(v2))
+                        # إصلاح الـ LaTeX
+                        st.session_state.practice_mode = practice_html.replace("\\", "\\\\")
+                        st.rerun()
+
+                if 'practice_mode' in st.session_state:
+                    st.info("Dynamic Practice Mode: Same format, new numbers.")
+                    st.components.v1.html(st.session_state.practice_mode, height=600, scrolling=True)
+                    if st.button("Close Practice Window"):
+                        del st.session_state.practice_mode
+                        st.rerun()
+            else:
+                st.info("No grades found. Complete an exam to unlock Practice Mode.")
+
+        # التبويب الثالث: التحليلات الشخصية
+        with tab3:
+            st.subheader("Learning Analytics")
+            if not my_grades.empty:
+                # رسم بياني لمستوى الطالب
+                fig = px.line(my_grades, x='Exam_ID', y='Score', title="My Progress Graph", markers=True)
+                fig.update_layout(yaxis_range=[0, 105])
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # حساب المتوسط
+                avg = my_grades['Score'].mean()
+                st.metric("Cumulative Average", f"{avg:.1f}%")
+            else:
+                st.warning("No data available for analytics yet.")
+                
 # --- 7. لوحة ولي الأمر (Parent Dashboard) ---
 elif st.session_state.role == 'parent':
     st.title("👨‍👩‍👦 Parent Portal")
