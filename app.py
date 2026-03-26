@@ -153,6 +153,143 @@ elif st.session_state.role == 'teacher':
                 pass_data = df_full.groupby('Exam_ID')['Score'].apply(lambda x: (x >= PASSING_SCORE).mean() * 100).reset_index()
                 fig2 = px.line(pass_data, x='Exam_ID', y='Score', title="Pass Rate % per Exam", markers=True)
                 st.plotly_chart(fig2, use_container_width=True)
+    # --- 5. Teacher Dashboard (Full Implementation) ---
+elif st.session_state.role == 'teacher':
+    st.sidebar.title(f"Welcome, {st.session_state.user.get('Name', 'Teacher')}")
+    menu = st.sidebar.radio("Navigation Menu", 
+                            ["Results Matrix", "Analytics", "Add New Exam", "Management"])
+    
+    if st.sidebar.button("Logout"):
+        st.session_state.update({'auth': False, 'user': None, 'role': None})
+        st.rerun()
+
+    # Load All Necessary Data
+    df_students = clean_data(load_sheet("Students"))
+    df_grades = clean_data(load_sheet("Grades"))
+    df_exams_info = load_sheet("Exams")
+    
+    # Logic to get all available sections for dropdowns
+    all_sections_list = []
+    if not df_students.empty: 
+        all_sections_list.extend(df_students['Section'].unique().tolist())
+    try:
+        df_sec_tab = clean_data(load_sheet("Sections"))
+        if not df_sec_tab.empty: 
+            all_sections_list.extend(df_sec_tab['Section_Name'].unique().tolist())
+    except: pass
+    final_sections = sorted(list(set([s for s in all_sections_list if str(s) != 'nan' and str(s).strip() != ""])))
+
+    # --- A. Results Matrix ---
+    if menu == "Results Matrix":
+        st.header("📊 Results Matrix")
+        st.markdown("<span class='arabic-sub'>مصفوفة النتائج العامة</span>", unsafe_allow_html=True)
+        
+        if not df_students.empty and not df_grades.empty:
+            sel_sec = st.selectbox("Filter by Section", ["All"] + final_sections)
+            filtered_stu = df_students[df_students['Section'] == sel_sec] if sel_sec != "All" else df_students
+            
+            df_merged = pd.merge(filtered_stu[['ID', 'Name']], df_grades, left_on='ID', right_on='Student_ID', how='left')
+            if not df_merged['Exam_ID'].dropna().empty:
+                matrix = df_merged.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
+                st.dataframe(matrix.style.highlight_max(axis=0, color='#bbf7d0'), use_container_width=True)
+            else: st.info("No data recorded yet.")
+        else: st.warning("No student or grade data found.")
+
+    # --- B. Analytics ---
+    elif menu == "Analytics":
+        st.header("📈 Performance Analytics")
+        st.markdown("<span class='arabic-sub'>تحليلات الأداء للشعب والاختبارات</span>", unsafe_allow_html=True)
+        
+        if not df_grades.empty and not df_students.empty:
+            df_full = pd.merge(df_grades, df_students, left_on='Student_ID', right_on='ID', how='inner')
+            
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Students", len(df_students))
+            m2.metric("Avg. Score", f"{df_grades['Score'].mean():.1f}%")
+            m3.metric("Total Exams", len(df_grades['Exam_ID'].unique()))
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                sec_avg = df_full.groupby('Section')['Score'].mean().reset_index()
+                fig1 = px.bar(sec_avg, x='Section', y='Score', title="Avg Score by Section", color='Score')
+                st.plotly_chart(fig1, use_container_width=True)
+            with col_b:
+                exam_avg = df_full.groupby('Exam_ID')['Score'].mean().reset_index()
+                fig2 = px.line(exam_avg, x='Exam_ID', y='Score', title="Avg Score per Exam", markers=True)
+                st.plotly_chart(fig2, use_container_width=True)
+        else: st.error("Not enough data for analytics.")
+
+    # --- C. Add New Exam (FIXED) ---
+    elif menu == "Add New Exam":
+        st.header("📝 Create New Exam")
+        st.markdown("<span class='arabic-sub'>إضافة اختبار جديد</span>", unsafe_allow_html=True)
+        
+        with st.form("exam_form_final"):
+            c1, c2 = st.columns(2)
+            with c1:
+                e_id = st.text_input("Exam ID (Code)")
+                e_ti = st.text_input("Exam Title")
+                s_date = st.date_input("Start Date", datetime.now())
+                s_time = st.time_input("Start Time", datetime.now().time())
+            with c2:
+                e_du = st.number_input("Duration (Minutes)", value=60)
+                e_se = st.multiselect("Target Sections", final_sections)
+                n_date = st.date_input("End Date", datetime.now())
+                n_time = st.time_input("End Time", datetime.now().time())
+            
+            e_ht = st.text_area("HTML Code (The Exam Interface)")
+            
+            if st.form_submit_button("Save & Publish Exam"):
+                if e_id and e_ti and e_se:
+                    try:
+                        old_ex = load_sheet("Exams")
+                        new_row = pd.DataFrame([{
+                            "Exam_ID": str(e_id).strip(), "Title": str(e_ti).strip(), 
+                            "Section": ",".join(e_se), "Duration": e_du,
+                            "Start_DateTime": f"{s_date} {s_time}",
+                            "End_DateTime": f"{n_date} {n_time}",
+                            "HTML_Code": e_ht, "Status": "Active"
+                        }])
+                        updated_ex = pd.concat([old_ex, new_row], ignore_index=True)
+                        conn.update(worksheet="Exams", data=updated_ex)
+                        st.success("Exam Published Successfully! / تم نشر الاختبار"); time.sleep(1); st.rerun()
+                    except Exception as ex_err: st.error(f"Error: {ex_err}")
+                else: st.error("Please fill all basic fields.")
+
+    # --- D. Management (FIXED) ---
+    elif menu == "Management":
+        st.header("⚙️ Management")
+        st.markdown("<span class='arabic-sub'>إدارة الطلاب والشعب</span>", unsafe_allow_html=True)
+        
+        t1, t2 = st.tabs(["Add Section / إضافة شعبة", "Add Student / إضافة طالب"])
+        
+        with t1:
+            with st.form("sec_form"):
+                n_s = st.text_input("New Section Name")
+                if st.form_submit_button("Save Section"):
+                    if n_s:
+                        old = load_sheet("Sections")
+                        upd = pd.concat([old, pd.DataFrame([{"Section_Name": n_s.strip()}])], ignore_index=True)
+                        conn.update(worksheet="Sections", data=upd)
+                        st.success("Section Added!"); time.sleep(1); st.rerun()
+        
+        with t2:
+            with st.form("stu_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    s_n = st.text_input("Student Name")
+                    s_i = st.text_input("Student ID")
+                with col2:
+                    s_s = st.selectbox("Select Section", final_sections)
+                    s_p = st.text_input("Password", value=str(random.randint(1000, 9999)))
+                
+                if st.form_submit_button("Register Student"):
+                    if s_n and s_i:
+                        old = load_sheet("Students")
+                        new_stu = pd.DataFrame([{"ID": str(s_i), "Name": s_n, "Password": str(s_p), "Section": s_s}])
+                        upd = pd.concat([old, new_stu], ignore_index=True)
+                        conn.update(worksheet="Students", data=upd)
+                        st.success("Student Registered!"); time.sleep(1); st.rerun()
 
     # --- Management & Exams (Add sections/students/exams) ---
     # [Rest of Teacher Logic remains similar but with bilingual headers]
