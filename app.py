@@ -194,18 +194,75 @@ elif st.session_state.role == 'teacher':
                             st.error("Please fill Name and ID")
                             
     # --- إضافة اختبار جديد ---
-    elif menu == "Add Exam":
-        st.header("📝 Add New Exam")
-        with st.form("exam"):
-            e_id = st.text_input("Exam ID")
-            e_ti = st.text_input("Title")
-            e_le = st.text_input("Lesson")
-            e_se = st.multiselect("Sections", available_sections)
-            e_du = st.number_input("Duration", value=60)
-            e_ht = st.text_area("HTML Code")
-            if st.form_submit_button("Save"):
-                conn.create(worksheet="Exams", data=pd.DataFrame([{"Exam_ID": e_id, "Title": e_ti, "Lesson": e_le, "Section": ",".join(e_se), "Duration": e_du, "HTML_Code": e_ht, "Status": "Active"}]))
-                st.success("Saved!")
+    # --- القسم الثالث: مصفوفة النتائج (الإصدار الاحترافي) ---
+    elif menu == "Exams Matrix":
+        st.header("📊 Results Matrix / مصفوفة النتائج")
+        
+        # التأكد من تحميل أحدث البيانات
+        df_students_mat = clean_data(load_sheet("Students"))
+        df_grades_mat = load_sheet("Grades")
+        
+        if not df_students_mat.empty:
+            # 1. فلتر الشعبة (يظهر دائماً طالما يوجد طلاب)
+            all_sections = sorted(df_students_mat['Section'].unique().tolist())
+            selected_sec = st.selectbox("Filter by Section / تصفية حسب الشعبة", ["All / الجميع"] + all_sections)
+            
+            # 2. فلترة الطلاب حسب الاختيار
+            if selected_sec != "All / الجميع":
+                filtered_students = df_students_mat[df_students_mat['Section'] == selected_sec]
+            else:
+                filtered_students = df_students_mat
+
+            st.markdown(f"**Students in Section ({selected_sec}): {len(filtered_students)}**")
+
+            # 3. معالجة المصفوفة
+            if not df_grades_mat.empty:
+                # توحيد أنواع البيانات للربط (الـ ID هو المفتاح)
+                df_grades_mat['Student_ID'] = df_grades_mat['Student_ID'].astype(str).str.strip().str.replace('.0', '', regex=False)
+                
+                # دمج الدرجات مع الطلاب المفلترين فقط
+                df_final = pd.merge(
+                    filtered_students[['ID', 'Name']], 
+                    df_grades_mat, 
+                    left_on='ID', 
+                    right_on='Student_ID', 
+                    how='left'
+                )
+                
+                # إنشاء الجدول المحوري (Pivot Table)
+                # الصفوف: الأسماء | الأعمدة: الأكواد/العناوين | القيم: الدرجات
+                if not df_final['Exam_ID'].dropna().empty:
+                    matrix = df_final.pivot_table(
+                        index='Name', 
+                        columns='Exam_ID', 
+                        values='Score', 
+                        aggfunc='max'
+                    ).fillna('-')
+                    
+                    # عرض المصفوفة بتنسيق بصري جذاب
+                    st.dataframe(
+                        matrix.style.highlight_max(axis=0, color='#bbf7d0') # تمييز التفوق بالأخضر
+                        .highlight_min(axis=0, color='#fecaca') # تمييز الضعف بالأحمر
+                        , use_container_width=True
+                    )
+                    
+                    # زر تحميل النتائج كملف Excel (ميزة إضافية للمعلم)
+                    csv = matrix.to_csv().encode('utf-8-sig')
+                    st.download_button(
+                        label="📥 Download Matrix (CSV) / تحميل النتائج",
+                        data=csv,
+                        file_name=f'Grades_{selected_sec}_{datetime.now().strftime("%Y%m%d")}.csv',
+                        mime='text/csv',
+                    )
+                else:
+                    st.info("Students found, but no exams completed yet. / تم العثور على الطلاب ولكن لم تكتمل أي اختبارات بعد.")
+                    st.table(filtered_students[['ID', 'Name']]) # عرض قائمة الأسماء فقط
+            else:
+                st.warning("No grades recorded in 'Grades' sheet. / لا توجد أي درجات مسجلة في ملف الإكسيل.")
+                st.table(filtered_students[['ID', 'Name']]) # عرض قائمة الأسماء لتأكيد نجاح الفلترة
+        else:
+            st.error("No students found. Add students in 'Management' first. / لا يوجد طلاب، أضف طلاباً من صفحة الإدارة أولاً.")
+            
 
 # --- 6. لوحة الطالب ---
 elif st.session_state.role == 'student':
