@@ -132,29 +132,38 @@ elif st.session_state.role == 'teacher':
         st.header("⚙️ Management / الإدارة")
         tab1, tab2 = st.tabs(["Add Section / إضافة شعبة", "Add Student / إضافة طالب"])
         
+# --- استبدل جزء "Create Section" بهذا الكود المطور ---
+
         with tab1:
+            st.subheader("Create New Section")
             with st.form("sec_form"):
                 new_sec_name = st.text_input("Section Name / اسم الشعبة")
                 if st.form_submit_button("Create Section"):
-                    new_sec_df = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
-                    conn.create(worksheet="Sections", data=new_sec_df)
-                    st.success("Section added!")
-                    time.sleep(1)
-                    st.rerun()
-
-        with tab2:
-            if not available_sections:
-                st.warning("Please add a Section first! / أضف شعبة أولاً")
-            else:
-                with st.form("stu_form"):
-                    s_name = st.text_input("Full Name / الاسم")
-                    s_id = st.text_input("ID / الرقم")
-                    s_sec = st.selectbox("Select Section", available_sections)
-                    s_pass = st.text_input("Password", value=str(random.randint(1000, 9999)))
-                    if st.form_submit_button("Register Student"):
-                        new_s_df = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
-                        conn.create(worksheet="Students", data=new_s_df)
-                        st.success("Student added successfully!")
+                    if new_sec_name:
+                        try:
+                            # 1. جلب البيانات الحالية من شيت Sections أولاً
+                            try:
+                                df_existing = load_sheet("Sections")
+                            except:
+                                # إذا كان الشيت فارغاً تماماً
+                                df_existing = pd.DataFrame(columns=["Section_Name"])
+                            
+                            # 2. إضافة الشعبة الجديدة للبيانات الحالية
+                            new_row = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
+                            
+                            # دمج الشعبة الجديدة مع القديم لمنع مسح البيانات السابقة
+                            updated_df = pd.concat([df_existing, new_row], ignore_index=True)
+                            
+                            # 3. استخدام update بدلاً من create لتعديل الشيت الموجود
+                            conn.update(worksheet="Sections", data=updated_df)
+                            
+                            st.success(f"Section '{new_sec_name}' added successfully!")
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error updating sheet: {e}")
+                    else:
+                        st.warning("Please enter a section name!")
 
     # --- 3. مصفوفة النتائج ---
     elif menu == "Exams Matrix":
