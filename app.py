@@ -146,166 +146,113 @@ elif st.session_state.role == 'teacher':
                         conn.update(worksheet="Students", data=pd.concat([df_stu, pd.DataFrame([{"ID": si, "Name": sn, "Password": sp, "Section": ss}])], ignore_index=True))
                         st.success("Registered!"); st.rerun()
 
-# --- 6. لوحة الطالب (Student Dashboard) ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
     
-    # --- 1. تحميل وتجهيز البيانات ---
-    with st.spinner("Syncing your dashboard..."):
+    # --- 1. تحميل البيانات (Data Sync) ---
+    with st.spinner("Syncing NIFHAM Dashboard..."):
         df_ex_stu = clean_data(load_sheet("Exams"))
         df_gr_stu = clean_data(load_sheet("Grades"))
         my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
 
-    # --- 2. مشغل الامتحان (Exam Runner Mode) ---
-    if st.session_state.exam is not None:
-        ex = st.session_state.exam
-        st.subheader(f"Exam: {ex['Title']}")
+    # --- 2. الشريط الجانبي (Sidebar) ---
+    st.sidebar.title("NIFHAM Math")
+    st.sidebar.markdown(f"**User:** {u['Name']}")
+    st.sidebar.markdown(f"**Section:** {u['Section']}")
+    
+    if st.sidebar.button("Logout / خروج"):
+        st.session_state.update({'auth': False, 'user': None, 'role': None})
+        st.rerun()
+
+    # --- 3. الواجهة الرئيسية (Main UI) ---
+    st.title(f"Welcome, {u['Name']} 👋")
+    st.markdown("<span class='arabic-sub'>مرحباً بك في منصة نفهم للرياضيات | لوحة متابعة الطالب</span>", unsafe_allow_html=True)
+
+    # التبويبات الثلاثة
+    tab1, tab2, tab3 = st.tabs(["📋 Assigned Exams", "✅ Grade History", "📊 My Performance"])
+
+    # --- TAB 1: الاختبارات المجدولة (Portal Logic) ---
+    with tab1:
+        st.subheader("Current Assignments")
+        now = datetime.now()
         
-        # منطق التوقيت (Timer Logic)
-        elapsed = time.time() - st.session_state.start_t
-        duration_sec = int(float(ex.get('Duration', 60))) * 60
-        remaining = duration_sec - elapsed
-        
-        if remaining <= 0:
-            st.error("Time Expired! / انتهى الوقت المحدد")
-            if st.button("Close and Exit"):
-                st.session_state.exam = None
-                st.rerun()
+        if not df_ex_stu.empty:
+            # فلترة: نشط + الشعبة صحيحة + لم يتم حله سابقاً
+            req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
+            taken_ids = my_grades['Exam_ID'].unique().tolist()
+            req = req[~req['Exam_ID'].astype(str).isin(map(str, taken_ids))]
+
+            valid_count = 0
+            for _, row in req.iterrows():
+                try:
+                    st_dt = datetime.strptime(str(row['Start_Time']), '%Y-%m-%d %H:%M:%S')
+                    en_dt = datetime.strptime(str(row['End_Time']), '%Y-%m-%d %H:%M:%S')
+                except:
+                    st_dt = en_dt = now
+
+                if st_dt <= now <= en_dt:
+                    valid_count += 1
+                    with st.container():
+                        st.markdown(f"""
+                        <div class="exam-card">
+                            <h3 style="margin:0; color:#007bff;">{row['Title']}</h3>
+                            <p style="margin:5px 0; color:#555;">Duration: {row['Duration']} Minutes</p>
+                            <small style="color:#d9534f;">Deadline: {en_dt.strftime('%I:%M %p')}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # --- الرابط السحري لفتح امتحان GAS ---
+                        # استبدل هذا الرابط برابط الـ Deployment الخاص بك من Google Apps Script
+                        gas_web_app_url = "رابط_الـ_Web_App_الخاص_بك_هنا"
+                        full_exam_url = f"https://script.google.com/macros/s/AKfycbz8yAfV-3V-W8Qp19CPSZ8Nl9gHvCIJLOI23SQuQwpRpDT0DVRH9kpjoAdg3TFIoHzQ/exec"
+                        
+                        st.markdown(f"""
+                            <a href="{full_exam_url}" target="_blank" style="text-decoration: none;">
+                                <div style="background-color: #28a745; color: white; padding: 12px; text-align: center; border-radius: 8px; font-weight: bold; margin-top: 10px;">
+                                    Start Exam in New Window / بدء الاختبار في نافذة جديدة
+                                </div>
+                            </a>
+                        """, unsafe_allow_html=True)
+                        st.caption("Note: Equations will render perfectly in the new window.")
+                
+                elif now < st_dt:
+                    st.info(f"🕒 Upcoming: **{row['Title']}** (Available at {st_dt.strftime('%I:%M %p')})")
+
+            if valid_count == 0 and not any(now < datetime.strptime(str(r['Start_Time']), '%Y-%m-%d %H:%M:%S') for _, r in req.iterrows() if 'Start_Time' in r):
+                st.success("You are all caught up! No active exams. / لا توجد اختبارات مطلوبة حالياً")
         else:
-            # عرض عداد الوقت
-            mins, secs = divmod(int(remaining), 60)
-            st.markdown(f'<div class="timer-box">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+            st.info("No exams published yet.")
+
+    # --- TAB 2: سجل الدرجات والتدريب ---
+    with tab2:
+        st.subheader("Your Academic Record")
+        if not my_grades.empty:
+            st.dataframe(my_grades[['Exam_ID', 'Score']].sort_index(ascending=False), use_container_width=True)
             
-            # --- معالجة وحقن البيانات (The Smart Injection) ---
-            html_content = str(ex['HTML_Code'])
+            st.divider()
+            st.subheader("💡 Smart Practice")
+            if st.button("Generate Practice for Last Concept / تدريب على آخر فكرة"):
+                # نأخذ آخر امتحان أداه كقالب للتدريب
+                last_id = my_grades.iloc[-1]['Exam_ID']
+                st.info(f"Generating practice based on {last_id}... Please check the assignments tab.")
+                # هنا يمكن توجيه الطالب لفتح رابط GAS مخصص للتدريب (Practice Mode)
+        else:
+            st.info("No grades found yet. Complete an exam to see your history.")
+
+    # --- TAB 3: التحليلات (Analytics) ---
+    with tab3:
+        st.subheader("Learning Progress")
+        if not my_grades.empty:
+            # رسم بياني خطي لتطور الدرجات
+            fig = px.line(my_grades, x='Exam_ID', y='Score', title="My Progress Graph", markers=True)
+            fig.update_layout(yaxis_range=[0, 105], template="plotly_white")
+            st.plotly_chart(fig, use_container_width=True)
             
-            # استبدال بيانات الهوية
-            html_content = html_content.replace("STUDENT_ID_HERE", str(u['ID']))
-            html_content = html_content.replace("STUDENT_NAME_HERE", str(u['Name']))
-            html_content = html_content.replace("EXAM_ID_HERE", str(ex['Exam_ID']))
-            
-            # توليد أرقام عشوائية ثابتة (Smart Seeding)
-            # نستخدم مجموع قيم ASCII للمعرفات لضمان رقم صحيح دائماً
-            if "VAR_A" in html_content:
-                safe_seed = sum(ord(c) for c in (str(u['ID']) + str(ex['Exam_ID'])))
-                random.seed(safe_seed)
-                # مثال لاستبدال المتغيرات (يمكنك إضافة المزيد حسب حاجتك)
-                html_content = html_content.replace("VAR_A", str(random.randint(2, 9)))
-                html_content = html_content.replace("VAR_B", str(random.randint(2, 5)))
-                random.seed() # إعادة تصفير البذرة للنظام العام
-
-            # --- الحل النهائي لمشكلة المعادلات (LaTeX Fix) ---
-            # نحول كل \ إلى \\ لكي تصل للمتصفح بشكل سليم ويفهمها MathJax
-            html_final = html_content.replace("\\", "\\\\")
-            
-            # عرض المكون البرمجي للاختبار
-            st.components.v1.html(html_final, height=850, scrolling=True)
-            
-            st.warning("⚠️ Do not refresh! / لا تقم بتحديث الصفحة أثناء الحل.")
-            if st.button("Exit Without Saving / خروج"):
-                st.session_state.exam = None
-                st.rerun()
-
-    # --- 3. اللوحة الرئيسية (Dashboard Mode) ---
-    else:
-        st.title(f"Welcome, {u['Name']} 👋")
-        st.markdown(f"<span class='arabic-sub'>مرحباً بك، {u['Name']} | شعبة: {u['Section']}</span>", unsafe_allow_html=True)
-        
-        if st.sidebar.button("Logout"):
-            st.session_state.update({'auth': False, 'user': None, 'role': None})
-            st.rerun()
-
-        # التبويبات الثلاثة الرئيسية
-        tab1, tab2, tab3 = st.tabs(["📋 Assigned Exams", "✅ Grade History", "📊 My Progress"])
-
-        # التبويب الأول: الاختبارات المتاحة حالياً
-        with tab1:
-            st.subheader("Current Assignments")
-            now = datetime.now()
-            
-            if not df_ex_stu.empty:
-                # فلترة: نشط + الشعبة مطابقة + لم يتم حله سابقاً
-                req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
-                taken = my_grades['Exam_ID'].unique().tolist()
-                req = req[~req['Exam_ID'].astype(str).isin(map(str, taken))]
-
-                found_exams = 0
-                for _, row in req.iterrows():
-                    # فحص نافذة الوقت (بداية ونهاية)
-                    try:
-                        st_dt = datetime.strptime(str(row['Start_Time']), '%Y-%m-%d %H:%M:%S')
-                        en_dt = datetime.strptime(str(row['End_Time']), '%Y-%m-%d %H:%M:%S')
-                    except:
-                        st_dt = en_dt = now # لو البيانات غير مكتملة نعتبره متاح
-
-                    if st_dt <= now <= en_dt:
-                        found_exams += 1
-                        with st.container():
-                            st.markdown(f"""
-                            <div class="exam-card">
-                                <strong>{row['Title']}</strong><br/>
-                                <small>Ends at: {en_dt.strftime('%I:%M %p')} on {en_dt.strftime('%d %b')}</small>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            if st.button(f"Start: {row['Title']}", key=f"btn_{row['Exam_ID']}"):
-                                st.session_state.exam = row.to_dict()
-                                st.session_state.start_t = time.time()
-                                st.rerun()
-                    elif now < st_dt:
-                        st.info(f"Upcoming: {row['Title']} (Starts at {st_dt.strftime('%I:%M %p')})")
-
-                if found_exams == 0:
-                    st.success("You are all caught up! No active exams. / لا توجد اختبارات مطلوبة حالياً")
-            else:
-                st.info("No exams published yet.")
-
-        # التبويب الثاني: السجل والتدريب الذكي
-        with tab2:
-            st.subheader("Your Scores")
-            if not my_grades.empty:
-                st.dataframe(my_grades[['Exam_ID', 'Score']].sort_index(ascending=False), use_container_width=True)
-                
-                st.divider()
-                st.subheader("💡 Smart Practice")
-                st.write("Ready for more? Generate a new practice based on your last exam.")
-                
-                if st.button("Generate Smart Practice / تدريب ذكي"):
-                    # نستخدم آخر اختبار تم حله كقالب (Template)
-                    last_id = my_grades.iloc[-1]['Exam_ID']
-                    tmpl_row = df_ex_stu[df_ex_stu['Exam_ID'] == last_id]
-                    
-                    if not tmpl_row.empty:
-                        tmpl_html = str(tmpl_row.iloc[0]['HTML_Code'])
-                        # توليد أرقام عشوائية جديدة للتدريب
-                        v1, v2 = random.randint(2, 9), random.randint(2, 5)
-                        practice_html = tmpl_html.replace("VAR_A", str(v1)).replace("VAR_B", str(v2))
-                        # إصلاح الـ LaTeX
-                        st.session_state.practice_mode = practice_html.replace("\\", "\\\\")
-                        st.rerun()
-
-                if 'practice_mode' in st.session_state:
-                    st.info("Dynamic Practice Mode: Same format, new numbers.")
-                    st.components.v1.html(st.session_state.practice_mode, height=600, scrolling=True)
-                    if st.button("Close Practice Window"):
-                        del st.session_state.practice_mode
-                        st.rerun()
-            else:
-                st.info("No grades found. Complete an exam to unlock Practice Mode.")
-
-        # التبويب الثالث: التحليلات الشخصية
-        with tab3:
-            st.subheader("Learning Analytics")
-            if not my_grades.empty:
-                # رسم بياني لمستوى الطالب
-                fig = px.line(my_grades, x='Exam_ID', y='Score', title="My Progress Graph", markers=True)
-                fig.update_layout(yaxis_range=[0, 105])
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # حساب المتوسط
-                avg = my_grades['Score'].mean()
-                st.metric("Cumulative Average", f"{avg:.1f}%")
-            else:
-                st.warning("No data available for analytics yet.")
+            # عرض المتوسط الحسابي كبطاقة
+            avg = my_grades['Score'].mean()
+            st.metric("Overall Average Score", f"{avg:.1f}%")
+        else:
+            st.warning("No data available for analytics yet.")
                 
 # --- 7. لوحة ولي الأمر (Parent Dashboard) ---
 elif st.session_state.role == 'parent':
