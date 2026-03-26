@@ -237,7 +237,7 @@ elif st.session_state.role == 'student':
                 fig = px.line(my_grades, x='Exam_ID', y='Score', title="My Progress", markers=True)
                 st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. Parent Dashboard (Section Added to fix the error) ---
+# --- 8. Parent Dashboard (Enhanced) ---
 elif st.session_state.role == 'parent':
     st.title("👨‍👩‍👦 Parent Portal")
     st.markdown("<span class='arabic-sub'>بوابة ولي الأمر - متابعة مستوى الأبناء</span>", unsafe_allow_html=True)
@@ -245,21 +245,50 @@ elif st.session_state.role == 'parent':
     if st.sidebar.button("Logout"):
         st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
     
-    # تحميل بيانات الطالب المرتبط بولي الأمر (بافتراض أن ID ولي الأمر هو نفس ID الطالب للمتابعة)
-    parent_data = st.session_state.user
-    child_id = parent_data.get('ID') # أو أي حقل آخر يربطهم
+    # 1. جلب بيانات ولي الأمر الحالية
+    u = st.session_state.user
     
-    df_all_grades = clean_data(load_sheet("Grades"))
-    child_grades = df_all_grades[df_all_grades['Student_ID'] == str(child_id)]
-    
-    if not child_grades.empty:
-        st.subheader(f"Grades for Student ID: {child_id}")
-        st.dataframe(child_grades[['Exam_ID', 'Score']], use_container_width=True)
+    # 2. الحصول على أرقام الأبناء من العمود الجديد (Children_IDs)
+    # نقوم بتحويل النص "101, 102" إلى قائمة ['101', '102']
+    raw_children = str(u.get('Children_IDs', ''))
+    if raw_children and raw_children != 'nan':
+        child_id_list = [c.strip() for c in raw_children.split(',')]
         
-        fig_parent = px.bar(child_grades, x='Exam_ID', y='Score', title="Child's Performance Index")
-        st.plotly_chart(fig_parent, use_container_width=True)
+        # 3. تحميل البيانات المطلوبة للمقارنة
+        df_all_grades = clean_data(load_sheet("Grades"))
+        df_all_students = clean_data(load_sheet("Students"))
+        
+        st.subheader(f"Monitoring {len(child_id_list)} Student(s)")
+        
+        # 4. عرض بيانات كل ابن في "صندوق" منفصل
+        for cid in child_id_list:
+            # جلب اسم الابن
+            student_info = df_all_students[df_all_students['ID'] == cid]
+            s_name = student_info.iloc[0]['Name'] if not student_info.empty else f"Student {cid}"
+            
+            with st.expander(f"Student: {s_name} (ID: {cid})", expanded=True):
+                child_grades = df_all_grades[df_all_grades['Student_ID'] == cid]
+                
+                if not child_grades.empty:
+                    col_left, col_right = st.columns([1, 2])
+                    
+                    with col_left:
+                        st.write("**Latest Grades:**")
+                        st.dataframe(child_grades[['Exam_ID', 'Score']].tail(5), use_container_width=True)
+                        avg = child_grades['Score'].mean()
+                        st.metric("Overall Average", f"{avg:.1f}%")
+                    
+                    with col_right:
+                        fig = px.bar(child_grades, x='Exam_ID', y='Score', 
+                                   title=f"Progress: {s_name}",
+                                   range_y=[0, 100], color='Score',
+                                   color_continuous_scale='RdYlGn')
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(f"No grades recorded for {s_name} yet.")
     else:
-        st.info("No grade records found for your child yet.")
+        st.warning("No children linked to this account. Please contact the administrator.")
+        st.info("Direct the admin to add Student IDs in 'Children_IDs' column in the Users sheet.")
 
 # --- 9. Final Catch ---
 else:
