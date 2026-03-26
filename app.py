@@ -6,7 +6,7 @@ from datetime import datetime
 import plotly.express as px
 import random
 
-# --- 1. إعدادات الصفحة والتنسيق ---
+# --- 1. Page Configuration / إعدادات الصفحة ---
 st.set_page_config(page_title="NIFHAM Pro | منصة نفهم التعليمية", layout="wide")
 
 st.markdown("""
@@ -20,17 +20,25 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. محرك البيانات (الاتصال بجوجل شيت) ---
+# --- 2. Data Engine / محرك البيانات ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_sheet(name):
+    # ttl=0 تضمن سحب أحدث البيانات دائماً من الشيت
     return conn.read(worksheet=name, ttl=0)
 
-# --- 3. إدارة الجلسة ---
+def clean_data(df):
+    """دالة لتنظيف أرقام الهوية وكلمات السر من أي زيادات أو مسافات"""
+    for col in ['ID', 'Password']:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.replace('.0', '', regex=False)
+    return df
+
+# --- 3. Session State / إدارة الجلسة ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'user': None, 'role': None, 'exam': None, 'start_t': None})
 
-# --- 4. شاشة الدخول ---
+# --- 4. Login Screen / شاشة الدخول المحدثة ---
 if not st.session_state.auth:
     st.title("🚀 NIFHAM Math Platform")
     st.markdown('<h3 class="arabic-text">تسجيل الدخول للمنصة</h3>', unsafe_allow_html=True)
@@ -41,27 +49,31 @@ if not st.session_state.auth:
         with st.form("login_form"):
             u_id = st.text_input("ID / الرقم التعريفي").strip()
             u_pass = st.text_input("Password / كلمة المرور", type="password").strip()
+            
             if st.form_submit_button("Sign In / دخول"):
-                if "Student" in role_choice:
-                    df = load_sheet("Students")
-                    user = df[(df['ID'].astype(str) == u_id) & (df['Password'].astype(str) == u_pass)]
-                    role = "student"
-                else:
-                    df = load_sheet("Users")
-                    user = df[(df['ID'].astype(str) == u_id) & (df['Password'].astype(str) == u_pass)]
-                    role = user.iloc[0]['Roll'] if not user.empty else None
+                # اختيار الشيت المناسب
+                sheet_target = "Students" if "Student" in role_choice else "Users"
+                df = clean_data(load_sheet(sheet_target))
                 
-                if not user.empty:
-                    st.session_state.update({'auth': True, 'user': user.iloc[0].to_dict(), 'role': role})
+                # التحقق من المطابقة
+                user_match = df[(df['ID'] == str(u_id)) & (df['Password'] == str(u_pass))]
+                
+                if not user_match.empty:
+                    user_data = user_match.iloc[0].to_dict()
+                    # تحديد الصلاحية (Role)
+                    final_role = "student" if "Student" in role_choice else user_data.get('Roll', 'parent')
+                    
+                    st.session_state.update({'auth': True, 'user': user_data, 'role': final_role})
+                    st.success(f"Welcome / مرحباً بك: {user_data['Name']}")
+                    time.sleep(1)
                     st.rerun()
                 else:
                     st.error("Invalid credentials / بيانات الدخول غير صحيحة")
 
-# --- 5. واجهة المعلم (Teacher Dashboard) ---
+# --- 5. Teacher Dashboard / لوحة المعلم ---
 elif st.session_state.role == 'teacher':
     st.sidebar.title("Teacher Tools")
     menu = st.sidebar.radio("Menu / القائمة", ["Exams Matrix", "Student Analysis", "Management", "Add Exam"])
-    
     if st.sidebar.button("Logout / خروج"):
         st.session_state.auth = False
         st.rerun()
@@ -76,63 +88,59 @@ elif st.session_state.role == 'teacher':
             col1, col2 = st.columns(2)
             with col1:
                 e_id = st.text_input("Exam ID / رمز الاختبار")
-                e_title = st.text_input("Exam Title / العنوان")
+                e_title = st.text_input("Exam Title")
                 e_lesson = st.text_input("Lesson / الدرس")
             with col2:
                 e_dur = st.number_input("Duration / المدة", min_value=1, value=60)
                 e_status = st.selectbox("Status", ["Active", "Hidden"])
-                all_sec = st.checkbox("Assign to all sections / لكل الشعب")
-                target_sec = st.multiselect("Select Sections", df_students['Section'].unique()) if not all_sec else ["All"]
+                all_sec = st.checkbox("Assign to all sections")
+                target_sec = st.multiselect("Sections", df_students['Section'].unique()) if not all_sec else ["All"]
             
-            e_html = st.text_area("HTML Code / كود الأسئلة")
-            show_ans = st.selectbox("Allow Answer Review? / السماح بمراجعة الإجابات", ["No", "Yes"])
+            e_html = st.text_area("HTML Code")
+            show_ans = st.selectbox("Show Answers?", ["No", "Yes"])
 
-            if st.form_submit_button("Save to Cloud / حفظ في السحابة"):
+            if st.form_submit_button("Save to Cloud"):
                 new_exam = pd.DataFrame([{
                     "Exam_ID": e_id, "Title": e_title, "Lesson": e_lesson,
                     "Section": ",".join(target_sec), "Duration": e_dur,
                     "HTML_Code": e_html, "Status": e_status, "Show_Answers": show_ans
                 }])
                 conn.create(worksheet="Exams", data=new_exam)
-                st.success("Exam saved successfully! / تم الحفظ بنجاح")
+                st.success("Exam saved!")
 
     elif menu == "Management":
         st.header("⚙️ Management / الإدارة")
-        t1, t2 = st.tabs(["Add Section / شعبة", "Add Student / طالب"])
-        with t2:
-            with st.form("add_s"):
-                s_name = st.text_input("Name / الاسم")
-                s_id = st.text_input("ID / الرقم")
-                s_sec = st.selectbox("Section", df_students['Section'].unique())
-                s_pass = st.text_input("Password", value=str(random.randint(1000, 9999)))
-                if st.form_submit_button("Register Student"):
-                    new_s = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
-                    conn.create(worksheet="Students", data=new_s)
-                    st.success("Student added!")
+        with st.form("add_student"):
+            st.subheader("Add New Student / إضافة طالب")
+            s_name = st.text_input("Name")
+            s_id = st.text_input("ID")
+            s_sec = st.selectbox("Section", df_students['Section'].unique())
+            s_pass = st.text_input("Password", value=str(random.randint(1000, 9999)))
+            if st.form_submit_button("Register"):
+                new_s = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
+                conn.create(worksheet="Students", data=new_s)
+                st.success("Student added successfully!")
 
     elif menu == "Exams Matrix":
-        st.header("📊 Results Matrix")
-        sec = st.selectbox("Section Filter", df_students['Section'].unique())
+        st.header("📊 Results Matrix / مصفوفة النتائج")
         if not df_grades.empty:
             matrix = df_grades.pivot_table(index='Student_Name', columns='Exam_ID', values='Score', aggfunc='max')
-            st.dataframe(matrix.style.highlight_max(axis=0), use_container_width=True)
+            st.dataframe(matrix, use_container_width=True)
 
-# --- 6. واجهة الطالب (Student Dashboard) ---
+# --- 6. Student Dashboard / لوحة الطالب ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
     if st.session_state.exam is None:
         st.title(f"Welcome, {u['Name']}")
-        tab1, tab2 = st.tabs(["📋 To-do / الاختبارات المطلوبة", "✅ Completed / المنجزة"])
+        tab1, tab2 = st.tabs(["📋 To-do / الاختبارات", "✅ Completed / المنجزة"])
         
         df_exams = load_sheet("Exams")
         df_grades = load_sheet("Grades")
         
         with tab1:
-            lesson_filter = st.selectbox("Filter by Lesson", ["All"] + list(df_exams['Lesson'].unique()))
+            # فلترة الاختبارات حسب الشعبة
             todo = df_exams[(df_exams['Status'] == 'Active') & 
                             (df_exams['Section'].str.contains(u['Section']) | (df_exams['Section'] == "All"))]
-            if lesson_filter != "All": todo = todo[todo['Lesson'] == lesson_filter]
-            
             for _, ex in todo.iterrows():
                 with st.container():
                     st.markdown(f'<div class="exam-card"><h4>{ex["Title"]}</h4><p>{ex["Lesson"]} | {ex["Duration"]} min</p></div>', unsafe_allow_html=True)
@@ -142,8 +150,7 @@ elif st.session_state.role == 'student':
 
         with tab2:
             my_grades = df_grades[df_grades['Student_ID'].astype(str) == str(u['ID'])]
-            st.table(my_grades[['Date', 'Exam_ID', 'Score']])
-
+            st.dataframe(my_grades, use_container_width=True)
     else:
         # مشغل الامتحان
         ex = st.session_state.exam
@@ -155,28 +162,18 @@ elif st.session_state.role == 'student':
             m, s = divmod(rem, 60)
             st.markdown(f'<div class="timer-box">{m:02d}:{s:02d}</div>', unsafe_allow_html=True)
             st.components.v1.html(ex['HTML_Code'], height=800, scrolling=True)
-            
-            # زر تسليم وهمي هنا (يجب أن يتم ربطه بـ JS لجمع الدرجة الفعلية)
-            if st.button("Submit Exam / تسليم"):
-                new_g = pd.DataFrame([{
-                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "Student_ID": u['ID'], "Student_Name": u['Name'],
-                    "Exam_ID": ex['Exam_ID'], "Score": 10 # مثال
-                }])
+            if st.button("Submit / تسليم"):
+                new_g = pd.DataFrame([{"Date": datetime.now().strftime("%Y-%m-%d %H:%M"), "Student_ID": u['ID'], "Student_Name": u['Name'], "Exam_ID": ex['Exam_ID'], "Score": 10}])
                 conn.create(worksheet="Grades", data=new_g)
-                st.success("Submitted!")
-                time.sleep(2)
-                st.session_state.exam = None
-                st.rerun()
+                st.success("Submitted!"); time.sleep(2); st.session_state.exam = None; st.rerun()
 
-# --- 7. واجهة ولي الأمر (Parent Dashboard) ---
+# --- 7. Parent Dashboard / لوحة ولي الأمر ---
 elif st.session_state.role == 'parent':
-    st.title("👪 Parent Portal")
+    st.title("👪 Parent Portal / بوابة ولي الأمر")
     u = st.session_state.user
-    st.info(f"Student Progress Report: {u['Name']}")
+    st.info(f"Report for Student ID: {u['ID']}")
     df_grades = load_sheet("Grades")
     my_child_grades = df_grades[df_grades['Student_ID'].astype(str) == str(u['ID'])]
     if not my_child_grades.empty:
-        fig = px.bar(my_child_grades, x='Exam_ID', y='Score', color='Score', title="Grades Evolution")
+        fig = px.bar(my_child_grades, x='Exam_ID', y='Score', title="Grades Evolution")
         st.plotly_chart(fig)
-        st.dataframe(my_child_grades)
