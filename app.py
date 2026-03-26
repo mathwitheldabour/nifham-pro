@@ -68,106 +68,114 @@ if not st.session_state.auth:
 # --- 5. Teacher Dashboard / لوحة المعلم ---
 elif st.session_state.role == 'teacher':
     st.sidebar.title("Teacher Tools")
+    # القائمة الجانبية
     menu = st.sidebar.radio("Menu / القائمة", ["Exams Matrix", "Student Analysis", "Management", "Add Exam"])
+    
     if st.sidebar.button("Logout / خروج"):
         st.session_state.update({'auth': False, 'user': None, 'role': None})
         st.rerun()
 
+    # تحميل البيانات المطلوبة للوحة المعلم
     df_exams = load_sheet("Exams")
     df_students = load_sheet("Students")
     df_grades = load_sheet("Grades")
+    
+    try:
+        df_all_sections = load_sheet("Sections")
+        available_sections = df_all_sections['Section_Name'].unique().tolist()
+    except:
+        available_sections = []
 
+    # --- القسم الأول: إضافة اختبار جديد ---
     if menu == "Add Exam":
         st.header("📝 Create New Exam / إضافة اختبار جديد")
-        with st.form("new_exam"):
+        with st.form("new_exam_form"):
             col1, col2 = st.columns(2)
             with col1:
-                e_id = st.text_input("Exam ID")
-                e_title = st.text_input("Exam Title")
+                e_id = st.text_input("Exam ID / رمز الاختبار")
+                e_title = st.text_input("Exam Title / العنوان")
                 e_lesson = st.text_input("Lesson / الدرس")
-            with col2:
-                e_dur = st.number_input("Duration / المدة", min_value=1, value=60)
-                e_status = st.selectbox("Status", ["Active", "Hidden"])
-                all_sec = st.checkbox("Assign to all sections")
-                target_sec = st.multiselect("Sections", df_students['Section'].unique()) if not all_sec else ["All"]
+                st.markdown("---")
+                st.subheader("Start Period / فترة البدء")
+                s_date = st.date_input("Start Date / تاريخ البدء", datetime.now())
+                s_time = st.time_input("Start Time / وقت البدء", datetime.now().time())
             
-            e_html = st.text_area("HTML Code")
-            show_ans = st.selectbox("Show Answers?", ["No", "Yes"])
+            with col2:
+                e_dur = st.number_input("Duration / المدة (دقيقة)", min_value=1, value=60)
+                e_status = st.selectbox("Status / الحالة", ["Active", "Hidden"])
+                all_sec = st.checkbox("Assign to all sections / لكل الشعب")
+                target_sec = st.multiselect("Select Sections", available_sections) if not all_sec else ["All"]
+                st.markdown("---")
+                st.subheader("End Period / فترة الانتهاء")
+                n_date = st.date_input("End Date / تاريخ الانتهاء", datetime.now())
+                n_time = st.time_input("End Time / وقت الانتهاء", datetime.now().time())
 
-            if st.form_submit_button("Save Exam"):
-                new_row = pd.DataFrame([{
-                    "Exam_ID": e_id, "Title": e_title, "Lesson": e_lesson,
-                    "Section": ",".join(map(str, target_sec)), "Duration": e_dur,
-                    "HTML_Code": e_html, "Status": e_status, "Show_Answers": show_ans
+            e_html = st.text_area("HTML Code / كود الأسئلة")
+            show_ans = st.selectbox("Show Answers? / مسموح بالمراجعة؟", ["No", "Yes"])
+
+            if st.form_submit_button("Save Exam / حفظ الاختبار"):
+                start_dt = f"{s_date} {s_time}"
+                end_dt = f"{n_date} {n_time}"
+                new_exam_df = pd.DataFrame([{
+                    "Exam_ID": str(e_id).strip(), "Title": str(e_title).strip(),
+                    "Lesson": str(e_lesson).strip(), "Section": ",".join(map(str, target_sec)),
+                    "Duration": int(e_dur), "Start_DateTime": start_dt,
+                    "End_DateTime": end_dt, "HTML_Code": e_html,
+                    "Status": e_status, "Show_Answers": show_ans
                 }])
-                conn.create(worksheet="Exams", data=new_row)
-                st.success("Exam saved successfully!")
+                conn.create(worksheet="Exams", data=new_exam_df)
+                st.success("Exam saved successfully! / تم الحفظ بنجاح")
 
-elif menu == "Management":
+    # --- القسم الثاني: الإدارة (شعب وطلاب) ---
+    elif menu == "Management":
         st.header("⚙️ Management / الإدارة")
-        
-        # إنشاء تبويبين: الأول للشعب والثاني للطلاب
         tab1, tab2 = st.tabs(["Add Section / إضافة شعبة", "Add Student / إضافة طالب"])
         
-        # 1. إضافة شعبة جديدة
         with tab1:
-            st.subheader("Add New Section / إضافة شعبة جديدة")
-            with st.form("section_form"):
-                new_sec_name = st.text_input("New Section Name / اسم الشعبة (مثلاً: 12A)")
-                if st.form_submit_button("Save Section / حفظ الشعبة"):
-                    if new_sec_name:
-                        try:
-                            # حفظ الشعبة في شيت "Sections"
-                            new_sec_df = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
-                            conn.create(worksheet="Sections", data=new_sec_df)
-                            st.success(f"Section '{new_sec_name}' added successfully!")
-                            time.sleep(1)
-                            st.rerun() # لإعادة تحميل القوائم بالشعبة الجديدة
-                        except Exception as e:
-                            st.error(f"Error: Make sure a sheet named 'Sections' exists. / تأكد من وجود شيت باسم Sections")
-                    else:
-                        st.warning("Please enter a name / يرجى إدخال اسم")
+            with st.form("sec_form"):
+                new_sec_name = st.text_input("Section Name / اسم الشعبة")
+                if st.form_submit_button("Create Section"):
+                    new_sec_df = pd.DataFrame([{"Section_Name": str(new_sec_name).strip()}])
+                    conn.create(worksheet="Sections", data=new_sec_df)
+                    st.success("Section added!")
+                    time.sleep(1)
+                    st.rerun()
 
-        # 2. إضافة طالب جديد
         with tab2:
-            st.subheader("Register Student / تسجيل طالب")
-            # جلب الشعب من شيت "Sections" بدلاً من شيت الطلاب
-            try:
-                df_all_sections = load_sheet("Sections")
-                list_of_sections = df_all_sections['Section_Name'].unique().tolist()
-            except:
-                list_of_sections = []
-
-            if not list_of_sections:
-                st.warning("Please add a Section first in the previous tab! / يرجى إضافة شعبة أولاً من التبويب السابق")
+            if not available_sections:
+                st.warning("Add a section first! / أضف شعبة أولاً")
             else:
-                with st.form("add_student_form"):
-                    s_name = st.text_input("Full Name / الاسم الكامل")
-                    s_id = st.text_input("ID / الرقم التعريفي")
-                    s_sec = st.selectbox("Select Section / اختر الشعبة", list_of_sections)
-                    s_pass = st.text_input("Password / كلمة المرور", value=str(random.randint(1000, 9999)))
-                    
-                    if st.form_submit_button("Save Student / حفظ الطالب"):
-                        if s_name and s_id:
-                            try:
-                                new_s_df = pd.DataFrame([{
-                                    "ID": str(s_id).strip(),
-                                    "Name": str(s_name).strip(),
-                                    "Password": str(s_pass).strip(),
-                                    "Section": str(s_sec).strip()
-                                }])
-                                conn.create(worksheet="Students", data=new_s_df)
-                                st.success(f"Student {s_name} registered successfully!")
-                            except Exception as e:
-                                st.error(f"Write Error: Check service account permissions. / خطأ في الكتابة: تأكد من صلاحيات المحرر")
-                        else:
-                            st.error("Please fill all fields / يرجى ملء جميع الحقول")
-    elif menu == "Exams Matrix":
-        st.header("📊 Results Matrix")
-        if not df_grades.empty:
-            matrix = df_grades.pivot_table(index='Student_Name', columns='Exam_ID', values='Score', aggfunc='max')
-            st.dataframe(matrix, use_container_width=True)
+                with st.form("stu_form"):
+                    s_name = st.text_input("Full Name / الاسم")
+                    s_id = st.text_input("ID / الرقم")
+                    s_sec = st.selectbox("Select Section", available_sections)
+                    s_pass = st.text_input("Password", value=str(random.randint(1000, 9999)))
+                    if st.form_submit_button("Register Student"):
+                        new_s_df = pd.DataFrame([{"ID": s_id, "Name": s_name, "Password": s_pass, "Section": s_sec}])
+                        conn.create(worksheet="Students", data=new_s_df)
+                        st.success("Student added successfully!")
 
+    # --- القسم الثالث: مصفوفة النتائج (السطر 165 المصحح) ---
+    elif menu == "Exams Matrix":
+        st.header("📊 Results Matrix / مصفوفة النتائج")
+        if not df_grades.empty:
+            matrix = df_grades.pivot_table(index='Student_Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
+            st.dataframe(matrix.style.highlight_max(axis=0, color='lightgreen'), use_container_width=True)
+        else:
+            st.info("No grades yet / لا توجد درجات مسجلة")
+
+    # --- القسم الرابع: تحليل مستوى الطالب ---
+    elif menu == "Student Analysis":
+        st.header("👤 Individual Analysis / تحليل المستوى")
+        if not df_students.empty:
+            selected_stu = st.selectbox("Select Student", df_students['Name'].unique())
+            stu_data = df_grades[df_grades['Student_Name'] == selected_stu]
+            if not stu_data.empty:
+                fig = px.line(stu_data, x='Date', y='Score', title=f"Progress: {selected_stu}")
+                st.plotly_chart(fig)
+                st.table(stu_data[['Date', 'Exam_ID', 'Score']])
+            else:
+                st.warning("No data for this student.")
 # --- 6. Student Dashboard / لوحة الطالب ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
