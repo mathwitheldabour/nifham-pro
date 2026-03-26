@@ -187,92 +187,124 @@ elif st.session_state.role == 'teacher':
 # --- 6. لوحة الطالب المتكاملة (نظام الـ 3 صفحات) ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    st.title(f"مرحباً بك، {u['Name']}")
     
-    if st.sidebar.button("Logout / خروج"):
-        st.session_state.update({'auth': False, 'user': None, 'role': None, 'exam': None})
-        st.rerun()
-    
-    # تحميل البيانات المطلوبة
-    df_ex_stu = load_sheet("Exams")
-    df_gr_stu = clean_data(load_sheet("Grades"))
-    
-    # إنشاء التبويبات (3 صفحات)
-    tab1, tab2, tab3 = st.tabs(["📋 الاختبارات المطلوبة", "✅ الاختبارات السابقة", "📊 التحليل والدرجات"])
-
-    # --- الصفحة الأولى: الاختبارات المطلوبة ---
-    with tab1:
-        st.subheader("Current Assignments / المهام الحالية")
-        now = datetime.now()
+    # التحقق: هل الطالب في وضع "داخل امتحان" أم في وضع "اللوحة الرئيسية"؟
+    if st.session_state.exam is None:
+        st.title(f"مرحباً بك، {u['Name']}")
         
-        # فلترة ذكية: (نشط) و (الشعبة تطابق) و (الوقت الحالي بين البداية والنهاية)
-        df_ex_stu['Start_DateTime'] = pd.to_datetime(df_ex_stu['Start_DateTime'])
-        df_ex_stu['End_DateTime'] = pd.to_datetime(df_ex_stu['End_DateTime'])
+        if st.sidebar.button("Logout / خروج"):
+            st.session_state.update({'auth': False, 'user': None, 'role': None})
+            st.rerun()
         
-        required = df_ex_stu[
-            (df_ex_stu['Status'] == 'Active') & 
-            (df_ex_stu['Section'].str.contains(str(u['Section']), na=False)) &
-            (df_ex_stu['Start_DateTime'] <= now) &
-            (df_ex_stu['End_DateTime'] >= now)
-        ]
+        # تحميل البيانات
+        df_ex_stu = load_sheet("Exams")
+        df_gr_stu = clean_data(load_sheet("Grades"))
         
-        # استبعاد الاختبارات التي أداها الطالب بالفعل
-        taken_ids = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
-        required = required[~required['Exam_ID'].isin(taken_ids)]
+        # إنشاء التبويبات
+        tab1, tab2, tab3 = st.tabs(["📋 الاختبارات المطلوبة", "✅ الاختبارات السابقة", "📊 التحليل والدرجات"])
 
-        if required.empty:
-            st.info("لا توجد اختبارات مطلوبة منك حالياً. تأكد من توقيت الاختبار أو الشعبة.")
-        else:
-            for _, ex in required.iterrows():
-                with st.container():
-                    st.markdown(f"""<div class="exam-card">
-                        <h4>{ex['Title']}</h4>
-                        <p>الدرس: {ex['Lesson']} | المدة: {ex['Duration']} دقيقة</p>
-                        <p style='color:red; font-size:0.8em;'>ينتهي في: {ex['End_DateTime']}</p>
-                    </div>""", unsafe_allow_html=True)
-                    if st.button("بدء الاختبار الآن", key=f"start_{ex['Exam_ID']}"):
-                        st.session_state.update({'exam': ex.to_dict(), 'start_t': time.time()})
-                        st.rerun()
-
-    # --- الصفحة الثانية: الاختبارات السابقة (للمراجعة فقط) ---
-    with tab2:
-        st.subheader("Previous Exams / سجل الاختبارات")
-        my_done_exams = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
-        
-        if my_done_exams.empty:
-            st.info("لم تقم بتأدية أي اختبارات بعد.")
-        else:
-            for _, row in my_done_exams.iterrows():
-                with st.expander(f"الاختبار: {row['Exam_ID']} - الدرجة: {row['Score']}"):
-                    st.write(f"تاريخ التسليم: {row['Date']}")
-                    
-                    # التحقق من سماح المعلم بالمراجعة
-                    exam_meta = df_ex_stu[df_ex_stu['Exam_ID'] == row['Exam_ID']].iloc[0]
-                    if exam_meta['Show_Answers'] == "Yes":
-                        st.success("المعلم سمح بمراجعة الإجابات الصحيحة.")
-                        # عرض الكود للمراجعة فقط (بدون أزرار تسليم)
-                        st.components.v1.html(exam_meta['HTML_Code'], height=500, scrolling=True)
-                    else:
-                        st.warning("يمكنك رؤية درجتك فقط؛ مراجعة الإجابات مغلقة من قبل المعلم.")
-
-    # --- الصفحة الثالثة: صفحة التحليل والدرجات ---
-    with tab3:
-        st.subheader("Performance Analysis / تحليل الأداء")
-        if not my_done_exams.empty:
-            # رسم بياني لتطور الدرجات
-            fig = px.line(my_done_exams, x='Date', y='Score', title="تطور درجاتك عبر الزمن", markers=True)
-            st.plotly_chart(fig, use_container_width=True)
+        with tab1:
+            st.subheader("Current Assignments / المهام الحالية")
+            now = datetime.now()
             
-            # جدول تفصيلي
-            st.table(my_done_exams[['Date', 'Exam_ID', 'Score']])
-            
-            # نصيحة برمجية للطباعة
-            st.info("💡 لطباعة تقرير درجاتك، اضغط Ctrl + P")
-        else:
-            st.info("سيظهر تحليلك البياني هنا بعد إتمام أول اختبار.")
+            if not df_ex_stu.empty:
+                # تنظيف وتأمين البيانات
+                df_ex_stu['Section'] = df_ex_stu['Section'].astype(str)
+                df_ex_stu['Status'] = df_ex_stu['Status'].astype(str)
+                
+                # فلترة الاختبارات
+                required = df_ex_stu[
+                    (df_ex_stu['Status'] == 'Active') & 
+                    (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))
+                ]
+                
+                # استبعاد اللي امتحنه قبل كدة
+                taken_ids = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
+                required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_ids))]
 
-# --- مشغل الاختبار (يظهر للطالب عند الضغط على ابدأ) ---
-if st.session_state.exam:
-    ex = st.session_state.exam
-    st.title(f"الاختبار: {ex['Title']}")
-    # (كود المشغل والتايمر المعتاد...)
+                if required.empty:
+                    st.info("لا توجد اختبارات مطلوبة منك حالياً.")
+                else:
+                    for _, ex in required.iterrows():
+                        with st.container():
+                            # عرض الكارت بتنسيق جميل
+                            title_display = str(ex['Title']).replace('.0', '')
+                            st.markdown(f"""<div class="exam-card">
+                                <h4>{title_display}</h4>
+                                <p>الدرس: {ex['Lesson']} | المدة: {ex['Duration']} دقيقة</p>
+                            </div>""", unsafe_allow_html=True)
+                            
+                            if st.button("بدء الاختبار الآن", key=f"btn_{ex['Exam_ID']}"):
+                                # حفظ بيانات الامتحان في الجلسة وبدء التايمر
+                                st.session_state.exam = ex.to_dict()
+                                st.session_state.start_t = time.time()
+                                st.rerun()
+            else:
+                st.warning("لا توجد بيانات في جدول الامتحانات.")
+
+        with tab2:
+            st.subheader("Previous Exams")
+            my_done = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
+            if not my_done.empty:
+                st.table(my_done[['Date', 'Exam_ID', 'Score']])
+            else:
+                st.info("لم تؤدِ أي اختبارات بعد.")
+
+        with tab3:
+            st.subheader("Analysis")
+            st.info("سيظهر تحليلك البياني هنا فور رصد درجاتك.")
+
+    # --- 7. مشغل الامتحان (هذا الجزء يظهر فقط عند بدء الامتحان) ---
+    else:
+        ex = st.session_state.exam
+        
+        # 1. زر الخروج (للطوارئ)
+        if st.button("⬅️ إلغاء والعودة للرئيسية"):
+            st.session_state.exam = None
+            st.rerun()
+
+        st.title(f"الاختبار: {str(ex['Title']).replace('.0', '')}")
+        st.markdown(f"**الدرس:** {ex['Lesson']} | **المطلوب:** حل جميع الأسئلة قبل انتهاء الوقت")
+        
+        # 2. حساب الوقت المتبقي
+        try:
+            duration_min = int(float(ex['Duration']))
+        except:
+            duration_min = 60
+            
+        elapsed = time.time() - st.session_state.start_t
+        remaining = (duration_min * 60) - elapsed
+        
+        if remaining <= 0:
+            st.error("⚠️ انتهى الوقت المحدد للاختبار!")
+            if st.button("العودة للوحة التحكم"):
+                st.session_state.exam = None
+                st.rerun()
+        else:
+            # 3. عرض التايمر
+            mins, secs = divmod(int(remaining), 60)
+            st.markdown(f'<div class="timer-box">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+            
+            # 4. عرض كود الـ HTML (الأسئلة)
+            html_content = str(ex['HTML_Code'])
+            if html_content and html_content != 'nan':
+                st.components.v1.html(html_content, height=800, scrolling=True)
+            else:
+                st.error("خطأ: كود الاختبار غير موجود في ملف الإكسيل!")
+            
+            # 5. زر التسليم
+            st.markdown("---")
+            if st.button("✅ إنهاء وتسليم الاختبار"):
+                # هنا بنسجل درجة افتراضية لحين ربط الـ JS بالدرجة الحقيقية
+                new_grade = pd.DataFrame([{
+                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "Student_ID": str(u['ID']),
+                    "Student_Name": u['Name'],
+                    "Exam_ID": str(ex['Exam_ID']),
+                    "Score": 100 # سيتم تعديله لاحقاً
+                }])
+                conn.update(worksheet="Grades", data=new_grade)
+                st.success("تم تسليم إجاباتك بنجاح!")
+                time.sleep(2)
+                st.session_state.exam = None
+                st.rerun()
