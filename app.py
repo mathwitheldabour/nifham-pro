@@ -149,84 +149,122 @@ elif st.session_state.role == 'teacher':
 elif st.session_state.role == 'student':
     u = st.session_state.user
     
-    # --- 1. تحميل البيانات (Data Sync) ---
-    with st.spinner("Syncing NIFHAM Dashboard..."):
+    # --- 1. تحديث البيانات لحظياً (Real-time Sync) ---
+    with st.spinner("Updating your portal..."):
         df_ex_stu = clean_data(load_sheet("Exams"))
         df_gr_stu = clean_data(load_sheet("Grades"))
+        # تصفية درجات الطالب الحالي
         my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
+        # قائمة معرفات الاختبارات التي أداها الطالب فعلياً
+        taken_exam_ids = my_grades['Exam_ID'].unique().tolist()
 
     # --- 2. الشريط الجانبي (Sidebar) ---
     st.sidebar.title("NIFHAM Math")
-    st.sidebar.markdown(f"**User:** {u['Name']}")
+    st.sidebar.markdown(f"**Welcome,** {u['Name']}")
     st.sidebar.markdown(f"**Section:** {u['Section']}")
     
     if st.sidebar.button("Logout / خروج"):
         st.session_state.update({'auth': False, 'user': None, 'role': None})
         st.rerun()
 
-    # --- 3. الواجهة الرئيسية (Main UI) ---
-    st.title(f"Welcome, {u['Name']} 👋")
-    st.markdown("<span class='arabic-sub'>مرحباً بك في منصة نفهم للرياضيات | لوحة متابعة الطالب</span>", unsafe_allow_html=True)
+    # --- 3. الواجهة الرئيسية ---
+    st.title(f"Student Portal | {u['Name']} 👋")
+    st.markdown("<span class='arabic-sub'>منصة نفهم للرياضيات - بوابة الطالب الذكية</span>", unsafe_allow_html=True)
 
-    # التبويبات الثلاثة
+    # التبويبات (Tabs)
     tab1, tab2, tab3 = st.tabs(["📋 Assigned Exams", "✅ Grade History", "📊 My Performance"])
 
-    # --- TAB 1: الاختبارات المجدولة (Portal Logic) ---
-# --- داخل كود الطالب في app.py ---
-with tab1:
-    st.subheader("Current Assignments")
-    
-    # 1. جلب الدرجات المسجلة للطالب الآن (لضمان التحديث اللحظي)
-    df_gr_realtime = clean_data(load_sheet("Grades"))
-    my_taken_ids = df_gr_realtime[df_gr_realtime['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
-    
-    # 2. فلترة الاختبارات: (نشطة) + (شعبتي) + (ليست في قائمة الـ taken)
-    req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
-    
-    # تحويل IDs لنصوص للمقارنة الدقيقة
-    req_pending = req[~req['Exam_ID'].astype(str).isin(map(str, my_taken_ids))]
-
-    if req_pending.empty:
-        st.success("No pending exams! / لا توجد اختبارات مطلوبة")
-    else:
-        for _, row in req_pending.iterrows():
-            # (منطق عرض البطاقة والزر)
-            gas_web_app_url = "رابط_الـ_Web_App_الخاص_بك_هنا"
-            full_exam_url = f"{gas_web_app_url}?sid={u['ID']}&name={u['Name']}&eid={row['Exam_ID']}"
+    # --- TAB 1: الاختبارات المطلوبة (بمنطق القفل) ---
+    with tab1:
+        st.subheader("Current Assignments")
+        now = datetime.now()
+        
+        if not df_ex_stu.empty:
+            # فلترة: نشط + الشعبة صحيحة + (لم يتم حله سابقاً)
+            active_exams = df_ex_stu[(df_ex_stu['Status'] == 'Active') & 
+                                     (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
             
-            st.markdown(f'<div class="exam-card"><b>{row["Title"]}</b></div>', unsafe_allow_html=True)
-            st.markdown(f'<a href="{full_exam_url}" target="_blank">Start Exam</a>', unsafe_allow_html=True)
+            # استبعاد الاختبارات المسلمة
+            pending_exams = active_exams[~active_exams['Exam_ID'].astype(str).isin(map(str, taken_exam_ids))]
 
-    # --- TAB 2: سجل الدرجات والتدريب ---
+            if pending_exams.empty:
+                st.success("Great job! No pending exams. / لا توجد اختبارات مطلوبة حالياً")
+            else:
+                for _, row in pending_exams.iterrows():
+                    # فحص مواعيد البداية والنهاية
+                    try:
+                        st_dt = datetime.strptime(str(row['Start_Time']), '%Y-%m-%d %H:%M:%S')
+                        en_dt = datetime.strptime(str(row['End_Time']), '%Y-%m-%d %H:%M:%S')
+                    except:
+                        st_dt = en_dt = now # متاح دائماً إذا لم يحدد المعلم وقتاً
+
+                    if st_dt <= now <= en_dt:
+                        with st.container():
+                            st.markdown(f"""
+                            <div class="exam-card">
+                                <h3 style="margin:0; color:#007bff;">{row['Title']}</h3>
+                                <p style="margin:5px 0;">Time: {row['Duration']} Min | Ends: {en_dt.strftime('%H:%M')}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # رابط الـ Web App الخاص بـ Google Apps Script
+                            # استبدل الرابط أدناه برابط الـ Deployment الخاص بك
+                            gas_url = "رابط_الـ_Web_App_الخاص_بك_هنا"
+                            exam_link = f"https://script.google.com/macros/s/AKfycbz8yAfV-3V-W8Qp19CPSZ8Nl9gHvCIJLOI23SQuQwpRpDT0DVRH9kpjoAdg3TFIoHzQ/exec"
+                            
+                            st.markdown(f"""
+                                <a href="{exam_link}" target="_blank" style="text-decoration: none;">
+                                    <div style="background-color: #28a745; color: white; padding: 12px; text-align: center; border-radius: 8px; font-weight: bold; margin-top: 10px;">
+                                        Open Exam Window / بدء الاختبار
+                                    </div>
+                                </a>
+                            """, unsafe_allow_html=True)
+                    elif now < st_dt:
+                        st.info(f"🕒 Upcoming: **{row['Title']}** (Starts at {st_dt.strftime('%I:%M %p')})")
+        else:
+            st.info("No exams available.")
+
+    # --- TAB 2: سجل الدرجات والتدريب الذكي ---
     with tab2:
         st.subheader("Your Academic Record")
         if not my_grades.empty:
-            st.dataframe(my_grades[['Exam_ID', 'Score']].sort_index(ascending=False), use_container_width=True)
+            # عرض جدول الدرجات بشكل تنازلي (الأحدث أولاً)
+            st.table(my_grades[['Exam_ID', 'Score']].sort_index(ascending=False))
             
             st.divider()
             st.subheader("💡 Smart Practice")
-            if st.button("Generate Practice for Last Concept / تدريب على آخر فكرة"):
-                # نأخذ آخر امتحان أداه كقالب للتدريب
+            st.write("Review the concepts of your last exam with new numbers.")
+            
+            if st.button("Generate Practice Session / تدريب ذكي"):
+                # نستخدم آخر امتحان تم حله كقالب
                 last_id = my_grades.iloc[-1]['Exam_ID']
-                st.info(f"Generating practice based on {last_id}... Please check the assignments tab.")
-                # هنا يمكن توجيه الطالب لفتح رابط GAS مخصص للتدريب (Practice Mode)
+                last_ex_row = df_ex_stu[df_ex_stu['Exam_ID'] == last_id]
+                
+                if not last_ex_row.empty:
+                    # عرض كود الـ HTML الخاص بالتدريب (مع استبدال VAR_A و VAR_B)
+                    tmpl = str(last_ex_row.iloc[0]['HTML_Code'])
+                    v1, v2 = random.randint(2, 9), random.randint(2, 5)
+                    practice_html = tmpl.replace("VAR_A", str(v1)).replace("VAR_B", str(v2))
+                    
+                    st.info(f"Practice for: {last_id}")
+                    # في التدريب نستخدم المكون الداخلي لبساطة العملية
+                    st.components.v1.html(practice_html.replace("\\", "\\\\"), height=500, scrolling=True)
         else:
-            st.info("No grades found yet. Complete an exam to see your history.")
+            st.info("Complete an exam to see your history.")
 
-    # --- TAB 3: التحليلات (Analytics) ---
+    # --- TAB 3: التحليلات الشخصية ---
     with tab3:
-        st.subheader("Learning Progress")
+        st.subheader("Progress Analytics")
         if not my_grades.empty:
-            # رسم بياني خطي لتطور الدرجات
-            fig = px.line(my_grades, x='Exam_ID', y='Score', title="My Progress Graph", markers=True)
+            # رسم بياني لمستوى الطالب
+            fig = px.line(my_grades, x='Exam_ID', y='Score', title="My Performance Index", markers=True)
             fig.update_layout(yaxis_range=[0, 105], template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
             
-            # عرض المتوسط الحسابي كبطاقة
-            avg = my_grades['Score'].mean()
-            st.metric("Overall Average Score", f"{avg:.1f}%")
+            # عرض المتوسط
+            st.metric("Overall Average Score", f"{my_grades['Score'].mean():.1f}%")
         else:
-            st.warning("No data available for analytics yet.")
+            st.warning("Take your first exam to see your performance chart!")
                 
 # --- 7. لوحة ولي الأمر (Parent Dashboard) ---
 elif st.session_state.role == 'parent':
