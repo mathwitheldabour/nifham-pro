@@ -205,18 +205,28 @@ elif st.session_state.role == 'student':
 
         with tab1:
             st.subheader("Current Assignments / المهام الحالية")
+            
+            # 1. جلب بيانات الدرجات الحالية للتفتيش فيها
+            df_gr_check = clean_data(load_sheet("Grades"))
+            
             if not df_ex_stu.empty:
-                # فلترة الامتحانات حسب الشعبة والحالة "نشط"
+                # 2. فلترة الاختبارات حسب الشعبة أولاً
                 required = df_ex_stu[
                     (df_ex_stu['Status'] == 'Active') & 
                     (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))
                 ]
                 
-                # --- (القفل الذكي): استبعاد أي امتحان أداه الطالب سابقاً ---
-                required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_exam_ids))]
+                # 3. المنطق الذكي: استبعاد أي امتحان له سجل درجة لهذا الطالب
+                if not df_gr_check.empty:
+                    # تحويل الأكواد لنصوص لضمان دقة المقارنة
+                    finished_exam_ids = df_gr_check[df_gr_check['Student_ID'] == str(u['ID'])]['Exam_ID'].astype(str).tolist()
+                    # عرض فقط الاختبارات التي "ليست" في قائمة المنتهية
+                    required = required[~required['Exam_ID'].astype(str).isin(finished_exam_ids)]
 
+                # 4. عرض الاختبارات المتبقية فقط
                 if required.empty:
-                    st.info("ممتاز! لا توجد اختبارات مطلوبة منك حالياً.")
+                    st.success("✅ أحسنت يا بطل! لقد أتممت جميع اختباراتك الحالية.")
+                    st.balloons() # حركة احتفالية بسيطة للطالب
                 else:
                     for _, ex in required.iterrows():
                         with st.container():
@@ -230,7 +240,7 @@ elif st.session_state.role == 'student':
                                 st.session_state.start_t = time.time()
                                 st.rerun()
             else:
-                st.info("لا توجد امتحانات مضافة حالياً.")
+                st.info("لا توجد اختبارات مضافة حالياً.")
 
         with tab2:
             st.subheader("Previous Exams")
