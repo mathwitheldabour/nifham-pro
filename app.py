@@ -184,9 +184,95 @@ elif st.session_state.role == 'teacher':
                     except Exception as e:
                         st.error(f"Error saving exam: {e}")
 
-# --- 6. لوحة الطالب ---
+# --- 6. لوحة الطالب المتكاملة (نظام الـ 3 صفحات) ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    st.title(f"Hi, {u['Name']}")
-    if st.sidebar.button("Logout"): st.session_state.auth = False; st.rerun()
-    # (بقية كود الطالب ...)
+    st.title(f"مرحباً بك، {u['Name']}")
+    
+    if st.sidebar.button("Logout / خروج"):
+        st.session_state.update({'auth': False, 'user': None, 'role': None, 'exam': None})
+        st.rerun()
+    
+    # تحميل البيانات المطلوبة
+    df_ex_stu = load_sheet("Exams")
+    df_gr_stu = clean_data(load_sheet("Grades"))
+    
+    # إنشاء التبويبات (3 صفحات)
+    tab1, tab2, tab3 = st.tabs(["📋 الاختبارات المطلوبة", "✅ الاختبارات السابقة", "📊 التحليل والدرجات"])
+
+    # --- الصفحة الأولى: الاختبارات المطلوبة ---
+    with tab1:
+        st.subheader("Current Assignments / المهام الحالية")
+        now = datetime.now()
+        
+        # فلترة ذكية: (نشط) و (الشعبة تطابق) و (الوقت الحالي بين البداية والنهاية)
+        df_ex_stu['Start_DateTime'] = pd.to_datetime(df_ex_stu['Start_DateTime'])
+        df_ex_stu['End_DateTime'] = pd.to_datetime(df_ex_stu['End_DateTime'])
+        
+        required = df_ex_stu[
+            (df_ex_stu['Status'] == 'Active') & 
+            (df_ex_stu['Section'].str.contains(str(u['Section']), na=False)) &
+            (df_ex_stu['Start_DateTime'] <= now) &
+            (df_ex_stu['End_DateTime'] >= now)
+        ]
+        
+        # استبعاد الاختبارات التي أداها الطالب بالفعل
+        taken_ids = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
+        required = required[~required['Exam_ID'].isin(taken_ids)]
+
+        if required.empty:
+            st.info("لا توجد اختبارات مطلوبة منك حالياً. تأكد من توقيت الاختبار أو الشعبة.")
+        else:
+            for _, ex in required.iterrows():
+                with st.container():
+                    st.markdown(f"""<div class="exam-card">
+                        <h4>{ex['Title']}</h4>
+                        <p>الدرس: {ex['Lesson']} | المدة: {ex['Duration']} دقيقة</p>
+                        <p style='color:red; font-size:0.8em;'>ينتهي في: {ex['End_DateTime']}</p>
+                    </div>""", unsafe_allow_html=True)
+                    if st.button("بدء الاختبار الآن", key=f"start_{ex['Exam_ID']}"):
+                        st.session_state.update({'exam': ex.to_dict(), 'start_t': time.time()})
+                        st.rerun()
+
+    # --- الصفحة الثانية: الاختبارات السابقة (للمراجعة فقط) ---
+    with tab2:
+        st.subheader("Previous Exams / سجل الاختبارات")
+        my_done_exams = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
+        
+        if my_done_exams.empty:
+            st.info("لم تقم بتأدية أي اختبارات بعد.")
+        else:
+            for _, row in my_done_exams.iterrows():
+                with st.expander(f"الاختبار: {row['Exam_ID']} - الدرجة: {row['Score']}"):
+                    st.write(f"تاريخ التسليم: {row['Date']}")
+                    
+                    # التحقق من سماح المعلم بالمراجعة
+                    exam_meta = df_ex_stu[df_ex_stu['Exam_ID'] == row['Exam_ID']].iloc[0]
+                    if exam_meta['Show_Answers'] == "Yes":
+                        st.success("المعلم سمح بمراجعة الإجابات الصحيحة.")
+                        # عرض الكود للمراجعة فقط (بدون أزرار تسليم)
+                        st.components.v1.html(exam_meta['HTML_Code'], height=500, scrolling=True)
+                    else:
+                        st.warning("يمكنك رؤية درجتك فقط؛ مراجعة الإجابات مغلقة من قبل المعلم.")
+
+    # --- الصفحة الثالثة: صفحة التحليل والدرجات ---
+    with tab3:
+        st.subheader("Performance Analysis / تحليل الأداء")
+        if not my_done_exams.empty:
+            # رسم بياني لتطور الدرجات
+            fig = px.line(my_done_exams, x='Date', y='Score', title="تطور درجاتك عبر الزمن", markers=True)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # جدول تفصيلي
+            st.table(my_done_exams[['Date', 'Exam_ID', 'Score']])
+            
+            # نصيحة برمجية للطباعة
+            st.info("💡 لطباعة تقرير درجاتك، اضغط Ctrl + P")
+        else:
+            st.info("سيظهر تحليلك البياني هنا بعد إتمام أول اختبار.")
+
+# --- مشغل الاختبار (يظهر للطالب عند الضغط على ابدأ) ---
+if st.session_state.exam:
+    ex = st.session_state.exam
+    st.title(f"الاختبار: {ex['Title']}")
+    # (كود المشغل والتايمر المعتاد...)
