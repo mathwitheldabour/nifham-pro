@@ -267,39 +267,36 @@ elif st.session_state.role == 'student':
             st.error("⚠️ انتهى الوقت!")
             if st.button("خروج"): st.session_state.exam = None; st.rerun()
         else:
+            # --- 7. مشغل الامتحان المطور (بدون إدخال يدوي) ---
+    else:
+        ex = st.session_state.exam
+        
+        # زر العودة للرئيسية
+        if st.button("⬅️ إنهاء الجلسة والعودة للوحة التحكم"):
+            st.session_state.exam = None
+            st.rerun()
+
+        st.title(f"الاختبار: {str(ex['Title']).replace('.0', '')}")
+        
+        # التايمر
+        elapsed = time.time() - st.session_state.start_t
+        remaining = (int(float(ex['Duration'])) * 60) - elapsed
+        
+        if remaining <= 0:
+            st.error("⚠️ انتهى الوقت!")
+            if st.button("خروج"): st.session_state.exam = None; st.rerun()
+        else:
             mins, secs = divmod(int(remaining), 60)
             st.markdown(f'<div class="timer-box">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
             
-            # عرض الأسئلة
-            st.components.v1.html(str(ex['HTML_Code']), height=800, scrolling=True)
+            # --- حقن بيانات الطالب في كود الـ HTML أوتوماتيكياً ---
+            raw_html = str(ex['HTML_Code'])
+            final_html = raw_html.replace("STUDENT_ID_HERE", str(u['ID']))
+            final_html = final_html.replace("STUDENT_NAME_HERE", str(u['Name']))
+            final_html = final_html.replace("EXAM_ID_HERE", str(ex['Exam_ID']))
             
-            st.markdown("---")
-            # لتسجيل النتيجة الحقيقية، الطالب بيدخل درجته اللي ظهرت له في الـ HTML (حل مؤقت بسيط)
-            # أو بنسجل إنه "تم بنجاح" والدرجة 100 كمثال
-            score_input = st.number_input("ادخل الدرجة التي ظهرت لك في الاختبار (للتأكيد)", min_value=0, max_value=100, step=1)
+            # عرض الاختبار
+            st.components.v1.html(final_html, height=800, scrolling=True)
             
-            if st.form_submit_button if 'form' in globals() else st.button("✅ تسليم النتيجة النهائية"):
-                try:
-                    # 1. جلب الدرجات القديمة
-                    try: old_grades = load_sheet("Grades")
-                    except: old_grades = pd.DataFrame(columns=["Date", "Student_ID", "Student_Name", "Exam_ID", "Score"])
-                    
-                    # 2. إضافة الدرجة الجديدة
-                    new_entry = pd.DataFrame([{
-                        "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "Student_ID": str(u['ID']),
-                        "Student_Name": str(u['Name']),
-                        "Exam_ID": str(ex['Exam_ID']),
-                        "Score": score_input # الدرجة المدخلة
-                    }])
-                    
-                    # 3. حفظ في الإكسيل
-                    updated_grades = pd.concat([old_grades, new_entry], ignore_index=True)
-                    conn.update(worksheet="Grades", data=updated_grades)
-                    
-                    st.success("تم تسجيل درجتك بنجاح في سجلات المستر!")
-                    time.sleep(2)
-                    st.session_state.exam = None
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"خطأ في التسجيل: {e}")
+            # (تم حذف مربع إدخال الدرجة اليدوي بناءً على طلبك)
+            st.info("💡 بمجرد ضغطك على 'إرسال' داخل نافذة الاختبار، سيتم تسجيل درجتك فوراً.")
