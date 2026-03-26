@@ -7,8 +7,8 @@ import plotly.express as px
 import random
 import numpy as np
 
-# --- 1. Page Config & Professional Styling ---
-st.set_page_config(page_title="NIFHAM Pro | Math Education Platform", layout="wide")
+# --- 1. إعدادات الصفحة والتنسيق (Bilingual Styling) ---
+st.set_page_config(page_title="NIFHAM Pro | Math Platform", layout="wide")
 
 PASSING_SCORE = 50
 
@@ -23,148 +23,109 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. Data Engine & Cleaning ---
+# --- 2. محرك البيانات (Data Engine) ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_sheet(name):
-    try:
-        return conn.read(worksheet=name, ttl=0)
-    except:
-        return pd.DataFrame()
+    try: return conn.read(worksheet=name, ttl=0)
+    except: return pd.DataFrame()
 
 def clean_data(df):
     if df.empty: return df
-    # تنظيف المعرفات من أي .0 ناتج عن الإكسيل
-    cols_to_clean = ['ID', 'Password', 'Section', 'Student_ID', 'Exam_ID', 'Section_Name', 'Children_IDs']
-    for col in cols_to_clean:
+    cols = ['ID', 'Password', 'Section', 'Student_ID', 'Exam_ID', 'Children_IDs', 'Section_Name']
+    for col in cols:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.replace('.0', '', regex=False)
-    # تحويل الدرجات لأرقام صحيحة للتحليل
     if 'Score' in df.columns:
         df['Score'] = pd.to_numeric(df['Score'], errors='coerce').fillna(0)
     return df
 
-# --- 3. Session State Management ---
+# --- 3. إدارة الجلسة (Session State) ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'user': None, 'role': None, 'exam': None, 'start_t': None})
 
-# --- 4. Main Application Logic ---
+# --- 4. منطق التطبيق (Application Logic) ---
 
-# --- A. LOGIN SCREEN ---
+# المحطة الأولى: شاشة الدخول
 if not st.session_state.auth:
     st.title("🚀 NIFHAM Math Platform")
     st.markdown("<span class='arabic-sub'>منصة نفهم للرياضيات - تسجيل الدخول</span>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 1.5, 1])
-    with col2:
+    col_l1, col_l2, col_l3 = st.columns([1, 1.5, 1])
+    with col_l2:
         role_choice = st.selectbox("Login as / الدخول كـ", ["Student / طالب", "Teacher / معلم", "Parent / ولي أمر"])
         with st.form("login_form"):
             u_id = st.text_input("User ID / المعرف").strip()
             u_pass = st.text_input("Password / كلمة المرور", type="password").strip()
             if st.form_submit_button("Sign In / دخول"):
-                sheet_name = "Students" if "Student" in role_choice else "Users"
-                df_u = clean_data(load_sheet(sheet_name))
-                user_match = df_u[(df_u['ID'] == str(u_id)) & (df_u['Password'] == str(u_pass))]
+                sheet_target = "Students" if "Student" in role_choice else "Users"
+                df_users = clean_data(load_sheet(sheet_target))
+                match = df_users[(df_users['ID'] == str(u_id)) & (df_users['Password'] == str(u_pass))]
                 
-                if not user_match.empty:
-                    u_data = user_match.iloc[0].to_dict()
+                if not match.empty:
+                    u_data = match.iloc[0].to_dict()
                     f_role = "student" if "Student" in role_choice else u_data.get('Roll', 'parent').lower()
                     st.session_state.update({'auth': True, 'user': u_data, 'role': f_role})
                     st.rerun()
-                else:
-                    st.error("Invalid Login / بيانات الدخول غير صحيحة")
+                else: st.error("Invalid Credentials / بيانات الدخول خاطئة")
 
-# --- B. TEACHER DASHBOARD ---
+# المحطة الثانية: لوحة المعلم (Teacher Dashboard)
 elif st.session_state.role == 'teacher':
-    st.sidebar.title(f"Welcome, Mr. {st.session_state.user.get('Name')}")
-    menu = st.sidebar.radio("Navigation", ["Results Matrix", "Full Analytics", "Exams Manager", "System Settings"])
-    
-    if st.sidebar.button("Logout"):
-        st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
+    st.sidebar.title(f"Mr. {st.session_state.user.get('Name')}")
+    menu = st.sidebar.radio("Menu", ["Results Matrix", "Analytics", "Exams Manager", "Settings"])
+    if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
 
     df_stu = clean_data(load_sheet("Students"))
     df_grd = clean_data(load_sheet("Grades"))
     df_exm = clean_data(load_sheet("Exams"))
-    
-    # تحضير قائمة الشعب
     all_sec = sorted(df_stu['Section'].unique().tolist()) if not df_stu.empty else []
 
     if menu == "Results Matrix":
         st.header("Results Matrix")
-        st.markdown("<span class='arabic-sub'>مصفوفة الدرجات التفصيلية</span>", unsafe_allow_html=True)
-        if not df_stu.empty and not df_grd.empty:
-            sel_sec = st.selectbox("Select Section", ["All"] + all_sec)
-            filtered_stu = df_stu[df_stu['Section'] == sel_sec] if sel_sec != "All" else df_stu
-            merged = pd.merge(filtered_stu[['ID', 'Name']], df_grd, left_on='ID', right_on='Student_ID', how='left')
-            if not merged['Exam_ID'].dropna().empty:
-                matrix = merged.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
-                st.dataframe(matrix.style.highlight_max(axis=0, color='#bbf7d0'), use_container_width=True)
-            else: st.info("No grades found.")
+        sel_sec = st.selectbox("Section", ["All"] + all_sec)
+        f_stu = df_stu[df_stu['Section'] == sel_sec] if sel_sec != "All" else df_stu
+        merged = pd.merge(f_stu[['ID', 'Name']], df_grd, left_on='ID', right_on='Student_ID', how='left')
+        if not merged['Exam_ID'].dropna().empty:
+            matrix = merged.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
+            st.dataframe(matrix.style.highlight_max(axis=0, color='#bbf7d0'), use_container_width=True)
 
-    elif menu == "Full Analytics":
-        st.header("Performance Analytics")
-        if not df_grd.empty and not df_stu.empty:
+    elif menu == "Analytics":
+        st.header("Full Analytics")
+        if not df_grd.empty:
             df_an = pd.merge(df_grd, df_stu, left_on='Student_ID', right_on='ID')
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Average Score", f"{df_grd['Score'].mean():.1f}%")
-            c2.metric("Total Submissions", len(df_grd))
-            c3.metric("Pass Rate", f"{(df_grd['Score'] >= PASSING_SCORE).mean()*100:.1f}%")
-            
-            st.plotly_chart(px.bar(df_an.groupby('Section')['Score'].mean().reset_index(), 
-                                   x='Section', y='Score', title="Average by Section"), use_container_width=True)
-        else: st.warning("Not enough data for analytics.")
+            c1, c2 = st.columns(2)
+            c1.plotly_chart(px.bar(df_an.groupby('Section')['Score'].mean().reset_index(), x='Section', y='Score', title="Avg by Section"))
+            c2.plotly_chart(px.histogram(df_grd, x="Score", nbins=10, title="Grade Distribution"))
 
     elif menu == "Exams Manager":
-        st.header("Manage Exams")
-        with st.form("add_exam"):
-            e_id = st.text_input("Exam ID (e.g., 5-1)")
-            e_ti = st.text_input("Exam Title")
-            
+        st.header("Exams Scheduler")
+        with st.form("add_ex"):
+            e_id = st.text_input("Exam ID")
+            e_ti = st.text_input("Title")
             col_t1, col_t2 = st.columns(2)
             with col_t1:
-                start_date = st.date_input("Start Date", datetime.now())
-                start_time = st.time_input("Start Time", datetime.now().time())
+                sd = st.date_input("Start Date"); stm = st.time_input("Start Time")
             with col_t2:
-                end_date = st.date_input("End Date", datetime.now())
-                end_time = st.time_input("End Time", datetime.now().time())
-            
-            e_se = st.multiselect("Assign to Sections", all_sec)
-            e_du = st.number_input("Duration (Minutes)", value=60)
-            e_ht = st.text_area("HTML Template")
-            
-            if st.form_submit_button("Publish Exam"):
-                # دمج التاريخ والوقت في نص واحد للتخزين
-                start_dt = f"{start_date} {start_time}"
-                end_dt = f"{end_date} {end_time}"
-                
-                new_ex = pd.DataFrame([{
-                    "Exam_ID": e_id, "Title": e_ti, "Section": ",".join(e_se), 
-                    "Duration": e_du, "HTML_Code": e_ht, "Status": "Active",
-                    "Start_Time": start_dt, "End_Time": end_dt
-                }])
+                ed = st.date_input("End Date"); etm = st.time_input("End Time")
+            e_se = st.multiselect("Sections", all_sec)
+            e_du = st.number_input("Duration (Min)", value=60)
+            e_ht = st.text_area("HTML Code")
+            if st.form_submit_button("Publish"):
+                new_ex = pd.DataFrame([{"Exam_ID": e_id, "Title": e_ti, "Section": ",".join(e_se), "Duration": e_du, "HTML_Code": e_ht, "Status": "Active", "Start_Time": f"{sd} {stm}", "End_Time": f"{ed} {etm}"}])
                 conn.update(worksheet="Exams", data=pd.concat([df_exm, new_ex], ignore_index=True))
-                st.success("Exam Published with Schedule!"); st.rerun()
+                st.success("Exam Published!"); st.rerun()
 
-    elif menu == "System Settings":
-        st.header("Settings")
-        t1, t2 = st.tabs(["Add Section", "Register Student"])
-        with t1:
-            with st.form("sec_f"):
-                ns = st.text_input("New Section Name")
-                if st.form_submit_button("Save"):
-                    old_sec = load_sheet("Sections")
-                    conn.update(worksheet="Sections", data=pd.concat([old_sec, pd.DataFrame([{"Section_Name": ns}])], ignore_index=True))
-                    st.success("Section Added!"); st.rerun()
-        with t2:
-            with st.form("stu_f"):
-                sn, si = st.text_input("Full Name"), st.text_input("ID")
-                ss = st.selectbox("Section", all_sec)
-                sp = st.text_input("Password", value=str(random.randint(1000, 9999)))
-                if st.form_submit_button("Register"):
-                    conn.update(worksheet="Students", data=pd.concat([df_stu, pd.DataFrame([{"ID": si, "Name": sn, "Password": sp, "Section": ss}])], ignore_index=True))
-                    st.success("Registered!"); st.rerun()
+    elif menu == "Settings":
+        st.header("Management")
+        with st.form("add_stu"):
+            sn, si = st.text_input("Name"), st.text_input("ID")
+            ss = st.selectbox("Section", all_sec)
+            sp = st.text_input("Password", value="1234")
+            if st.form_submit_button("Register"):
+                conn.update(worksheet="Students", data=pd.concat([df_stu, pd.DataFrame([{"ID": si, "Name": sn, "Password": sp, "Section": ss}])], ignore_index=True))
+                st.success("Done!"); st.rerun()
 
-# --- C. STUDENT DASHBOARD ---
+# المحطة الثالثة: لوحة الطالب (Student Dashboard)
 elif st.session_state.role == 'student':
     u = st.session_state.user
     df_ex_stu = clean_data(load_sheet("Exams"))
@@ -172,54 +133,76 @@ elif st.session_state.role == 'student':
     my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
 
     if st.session_state.exam is not None:
-        # EXAM RUNNER
+        # --- EXAM RUNNER ---
         ex = st.session_state.exam
-        st.subheader(f"Exam: {ex['Title']}")
+        st.subheader(f"Active Exam: {ex['Title']}")
         rem = (int(float(ex.get('Duration', 60))) * 60) - (time.time() - st.session_state.start_t)
+        
         if rem <= 0:
             st.error("Time Expired!"); st.session_state.exam = None; st.rerun()
         else:
             m, s = divmod(int(rem), 60)
             st.markdown(f'<div class="timer-box">{m:02d}:{s:02d}</div>', unsafe_allow_html=True)
-            # Dynamic Injection & LaTeX Fix
-            html = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID'])).replace("STUDENT_NAME_HERE", str(u['Name']))
-            if "VAR_A" in html:
-                seed_value = sum(ord(c) for c in (str(u['ID']) + str(ex['Exam_ID'])))
-                random.seed(seed_value)
-                st.components.v1.html(html.replace("\\", "\\\\"), height=850, scrolling=True)
-              if st.button("Cancel & Exit"): st.session_state.exam = None; st.rerun()
-    else:
-        st.title(f"Welcome, {u['Name']} 👋")
-        if st.sidebar.button("Logout"): st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
+            
+            # Injection & LaTeX Fix
+            html_raw = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID'])).replace("STUDENT_NAME_HERE", str(u['Name']))
+            if "VAR_A" in html_raw:
+                # Safe Seed for non-numeric IDs
+                seed_val = sum(ord(c) for c in (str(u['ID']) + str(ex['Exam_ID'])))
+                random.seed(seed_val)
+                html_raw = html_raw.replace("VAR_A", str(random.randint(2,9))).replace("VAR_B", str(random.randint(2,5)))
+                random.seed()
+            
+            st.components.v1.html(html_raw.replace("\\", "\\\\"), height=850, scrolling=True)
+            if st.button("Exit Exam"): st.session_state.exam = None; st.rerun()
 
-        t1, t2, t3 = st.tabs(["📋 Assigned", "✅ Grades", "📊 My Performance"])
+    else:
+        # --- STUDENT HOME ---
+        st.title(f"Welcome, {u['Name']} 👋")
+        if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
+
+        t1, t2, t3 = st.tabs(["📋 Assigned", "✅ History", "📊 Analytics"])
         with t1:
+            st.subheader("Pending Exams")
+            now = datetime.now()
             req = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
             taken = my_grades['Exam_ID'].unique().tolist()
             req = req[~req['Exam_ID'].astype(str).isin(map(str, taken))]
+            
             for _, r in req.iterrows():
-                st.markdown(f'<div class="exam-card"><b>{r["Title"]}</b></div>', unsafe_allow_html=True)
-                if st.button(f"Start Exam", key=r['Exam_ID']):
-                    st.session_state.exam = r.to_dict(); st.session_state.start_t = time.time(); st.rerun()
+                try:
+                    st_t = datetime.strptime(str(r['Start_Time']), '%Y-%m-%d %H:%M:%S')
+                    en_t = datetime.strptime(str(r['End_Time']), '%Y-%m-%d %H:%M:%S')
+                except: st_t, en_t = now, now
+                
+                if st_t <= now <= en_t:
+                    st.markdown(f'<div class="exam-card"><b>{r["Title"]}</b><br><small>Ends: {en_t.strftime("%H:%M")}</small></div>', unsafe_allow_html=True)
+                    if st.button(f"Start Exam", key=r['Exam_ID']):
+                        st.session_state.exam = r.to_dict(); st.session_state.start_t = time.time(); st.rerun()
+                elif now < st_t:
+                    st.info(f"Upcoming: {r['Title']} at {st_t.strftime('%H:%M')}")
+        
         with t2:
             st.table(my_grades[['Exam_ID', 'Score']])
             st.divider()
-            if st.button("Generate Smart Practice"):
+            if st.button("Generate Smart Practice / تدريب ذكي"):
                 if not my_grades.empty:
-                    last = df_ex_stu[df_ex_stu['Exam_ID'] == my_grades.iloc[-1]['Exam_ID']].iloc[0]['HTML_Code']
-                    st.session_state.practice_mode = str(last).replace("VAR_A", str(random.randint(2,9))).replace("VAR_B", str(random.randint(2,5))).replace("\\", "\\\\")
+                    last_id = my_grades.iloc[-1]['Exam_ID']
+                    tmpl = df_ex_stu[df_ex_stu['Exam_ID'] == last_id].iloc[0]['HTML_Code']
+                    st.session_state.practice_mode = str(tmpl).replace("VAR_A", str(random.randint(2,9))).replace("VAR_B", str(random.randint(2,5))).replace("\\", "\\\\")
                     st.rerun()
             if 'practice_mode' in st.session_state:
                 st.components.v1.html(st.session_state.practice_mode, height=500, scrolling=True)
                 if st.button("Close Practice"): del st.session_state.practice_mode; st.rerun()
+        
         with t3:
             if not my_grades.empty:
                 st.plotly_chart(px.line(my_grades, x='Exam_ID', y='Score', markers=True))
 
-# --- D. PARENT DASHBOARD ---
+# المحطة الرابعة: لوحة ولي الأمر
 elif st.session_state.role == 'parent':
     st.title("👨‍👩‍👦 Parent Portal")
-    if st.sidebar.button("Logout"): st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
+    if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
     u = st.session_state.user
     c_ids = str(u.get('Children_IDs', '')).split(',')
     df_g = clean_data(load_sheet("Grades"))
@@ -227,12 +210,12 @@ elif st.session_state.role == 'parent':
     for cid in c_ids:
         cid = cid.strip()
         name = df_s[df_s['ID'] == cid]['Name'].iloc[0] if not df_s[df_s['ID'] == cid].empty else cid
-        with st.expander(f"Student: {name}"):
+        with st.expander(f"Child: {name}"):
             cg = df_g[df_g['Student_ID'] == cid]
             st.dataframe(cg[['Exam_ID', 'Score']], use_container_width=True)
-            if not cg.empty: st.plotly_chart(px.bar(cg, x='Exam_ID', y='Score'))
+            if not cg.empty: st.plotly_chart(px.bar(cg, x='Exam_ID', y='Score', range_y=[0,100]))
 
-# --- E. PROTECTION ---
+# الحماية النهائية
 else:
-    st.warning("Access Denied. Please Login.")
-    st.session_state.update({'auth': False, 'user': None, 'role': None})
+    st.warning("Please Login.")
+    st.session_state.update({'auth': False})
