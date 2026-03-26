@@ -230,6 +230,22 @@ elif st.session_state.role == 'student':
         with tab2:
             st.subheader("Grade History")
             st.table(my_grades[['Exam_ID', 'Score']])
+            # Inside Student Dashboard - Tab 2 (History)
+if st.button(f"Practice Similar Concept / تدرب على أفكار مشابهة"):
+    # 1. جلب نوع الأسئلة من الاختبار القديم
+    concept = ex['Concept_Type'] # مثلاً: معادلات خطية
+    
+    # 2. توليد أسئلة جديدة بنفس القواعد
+    new_q, new_ans = generate_dynamic_question(concept)
+    
+    # 3. عرضها للطالب فوراً
+    st.info(f"New Practice Question: {new_q}")
+    user_input = st.number_input("Your Answer", key="dynamic_q")
+    if st.button("Check Answer"):
+        if user_input == new_ans:
+            st.success("Correct! / إجابة صحيحة")
+        else:
+            st.error(f"Try again! / حاول مجدداً")
 
         with tab3:
             st.subheader("Performance Chart")
