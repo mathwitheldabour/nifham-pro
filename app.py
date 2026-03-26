@@ -195,32 +195,53 @@ elif st.session_state.role == 'teacher':
                             
     # --- إضافة اختبار جديد ---
     # --- القسم الثالث: مصفوفة النتائج (الإصدار الاحترافي) ---
+    # --- القسم الثالث: مصفوفة النتائج (حل مشكلة الفلتر الشامل) ---
     elif menu == "Exams Matrix":
         st.header("📊 Results Matrix / مصفوفة النتائج")
         
-        # التأكد من تحميل أحدث البيانات
+        # 1. تحميل أحدث البيانات وتنظيفها
         df_students_mat = clean_data(load_sheet("Students"))
         df_grades_mat = load_sheet("Grades")
         
-        if not df_students_mat.empty:
-            # 1. فلتر الشعبة (يظهر دائماً طالما يوجد طلاب)
-            all_sections = sorted(df_students_mat['Section'].unique().tolist())
-            selected_sec = st.selectbox("Filter by Section / تصفية حسب الشعبة", ["All / الجميع"] + all_sections)
+        # 2. بناء "قائمة الشعب الشاملة" (الرادار)
+        # نستخدم set لضمان عدم التكرار
+        comprehensive_sections = set()
+        
+        # إضافة الشعب الموجودة في شيت الطلاب (القديمة والجديدة)
+        if not df_students_mat.empty and 'Section' in df_students_mat.columns:
+            sections_in_students = df_students_mat['Section'].astype(str).str.strip().unique().tolist()
+            comprehensive_sections.update(sections_in_students)
             
-            # 2. فلترة الطلاب حسب الاختيار
+        # إضافة الشعب الموجودة في شيت Sections (التي أضفتها أنت مؤخراً)
+        try:
+            df_sec_tab = load_sheet("Sections")
+            if not df_sec_tab.empty:
+                sections_in_tab = df_sec_tab['Section_Name'].astype(str).str.strip().unique().tolist()
+                comprehensive_sections.update(sections_in_tab)
+        except:
+            pass
+
+        # تحويلها لقائمة مرتبة وحذف القيم الفارغة أو "nan"
+        final_filter_list = sorted([s for s in comprehensive_sections if s.lower() != 'nan' and s.strip() != ""])
+
+        if not df_students_mat.empty:
+            # 3. عرض الفلتر الموحد (الآن سيشمل كل شيء)
+            selected_sec = st.selectbox("Select Section / تصفية حسب الشعبة", ["All / الجميع"] + final_filter_list)
+            
+            # 4. تصفية الطلاب بناءً على الاختيار
             if selected_sec != "All / الجميع":
                 filtered_students = df_students_mat[df_students_mat['Section'] == selected_sec]
             else:
                 filtered_students = df_students_mat
 
-            st.markdown(f"**Students in Section ({selected_sec}): {len(filtered_students)}**")
+            st.write(f"🔍 Students found: {len(filtered_students)}")
 
-            # 3. معالجة المصفوفة
+            # 5. بناء المصفوفة
             if not df_grades_mat.empty:
-                # توحيد أنواع البيانات للربط (الـ ID هو المفتاح)
+                # توحيد الـ ID للربط
                 df_grades_mat['Student_ID'] = df_grades_mat['Student_ID'].astype(str).str.strip().str.replace('.0', '', regex=False)
                 
-                # دمج الدرجات مع الطلاب المفلترين فقط
+                # دمج الدرجات مع الطلاب المفلترين
                 df_final = pd.merge(
                     filtered_students[['ID', 'Name']], 
                     df_grades_mat, 
@@ -229,39 +250,21 @@ elif st.session_state.role == 'teacher':
                     how='left'
                 )
                 
-                # إنشاء الجدول المحوري (Pivot Table)
-                # الصفوف: الأسماء | الأعمدة: الأكواد/العناوين | القيم: الدرجات
                 if not df_final['Exam_ID'].dropna().empty:
-                    matrix = df_final.pivot_table(
-                        index='Name', 
-                        columns='Exam_ID', 
-                        values='Score', 
-                        aggfunc='max'
-                    ).fillna('-')
+                    matrix = df_final.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
+                    st.dataframe(matrix.style.highlight_max(axis=0, color='#bbf7d0'), use_container_width=True)
                     
-                    # عرض المصفوفة بتنسيق بصري جذاب
-                    st.dataframe(
-                        matrix.style.highlight_max(axis=0, color='#bbf7d0') # تمييز التفوق بالأخضر
-                        .highlight_min(axis=0, color='#fecaca') # تمييز الضعف بالأحمر
-                        , use_container_width=True
-                    )
-                    
-                    # زر تحميل النتائج كملف Excel (ميزة إضافية للمعلم)
+                    # زر التحميل
                     csv = matrix.to_csv().encode('utf-8-sig')
-                    st.download_button(
-                        label="📥 Download Matrix (CSV) / تحميل النتائج",
-                        data=csv,
-                        file_name=f'Grades_{selected_sec}_{datetime.now().strftime("%Y%m%d")}.csv',
-                        mime='text/csv',
-                    )
+                    st.download_button(label="📥 Download Grades", data=csv, file_name=f'Grades_{selected_sec}.csv')
                 else:
-                    st.info("Students found, but no exams completed yet. / تم العثور على الطلاب ولكن لم تكتمل أي اختبارات بعد.")
-                    st.table(filtered_students[['ID', 'Name']]) # عرض قائمة الأسماء فقط
+                    st.info("No exams taken by these students yet.")
+                    st.table(filtered_students[['ID', 'Name']])
             else:
-                st.warning("No grades recorded in 'Grades' sheet. / لا توجد أي درجات مسجلة في ملف الإكسيل.")
-                st.table(filtered_students[['ID', 'Name']]) # عرض قائمة الأسماء لتأكيد نجاح الفلترة
+                st.warning("No grades found in 'Grades' sheet.")
+                st.table(filtered_students[['ID', 'Name']])
         else:
-            st.error("No students found. Add students in 'Management' first. / لا يوجد طلاب، أضف طلاباً من صفحة الإدارة أولاً.")
+            st.error("Students sheet is empty! / شيت الطلاب فارغ")
             
 
 # --- 6. لوحة الطالب ---
