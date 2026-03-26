@@ -179,42 +179,72 @@ elif st.session_state.role == 'teacher':
                     conn.update(worksheet="Students", data=pd.concat([old, pd.DataFrame([{"ID": si, "Name": sn, "Password": sp, "Section": ss}])], ignore_index=True))
                     st.success("Registered!"); time.sleep(1); st.rerun()
 
-# --- 6. Student Dashboard (Full Bilingual Implementation) ---
+# --- 6. Student Dashboard (Updated) ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    
-    # تحميل البيانات
     df_ex_stu = clean_data(load_sheet("Exams"))
     df_gr_stu = clean_data(load_sheet("Grades"))
     my_grades = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
 
-    # --- PART 1: Exam Runner (Inside Active Exam) ---
     if st.session_state.exam is not None:
+        # مشغل الامتحان (نفس المنطق السابق مع استبدال الاسم والـ ID)
         ex = st.session_state.exam
-        st.subheader(f"Active Exam: {ex['Title']}")
-        st.markdown(f"<span class='arabic-sub'>الاختبار النشط: {ex['Title']}</span>", unsafe_allow_html=True)
-        
-        # المؤقت
+        st.subheader(f"Exam: {ex['Title']}")
         elapsed = time.time() - st.session_state.start_t
-        remaining = (int(float(ex.get('Duration', 60))) * 60) - elapsed
+        rem = (int(float(ex.get('Duration', 60))) * 60) - elapsed
         
-        if remaining <= 0:
-            st.error("Time is Up! / انتهى الوقت")
-            if st.button("Back to Dashboard"): 
-                st.session_state.exam = None
-                st.rerun()
+        if rem <= 0:
+            st.error("Time Up!"); st.session_state.exam = None; st.rerun()
         else:
-            m, s = divmod(int(remaining), 60)
+            m, s = divmod(int(rem), 60)
             st.markdown(f'<div class="timer-box">{m:02d}:{s:02d}</div>', unsafe_allow_html=True)
-            
-            # حقن هوية الطالب في الـ HTML
-            final_html = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID']))
-            st.components.v1.html(final_html, height=800, scrolling=True)
-            
-            if st.button("Exit Exam / خروج"):
-                st.session_state.exam = None
-                st.rerun()
+            # الحقن الديناميكي للبيانات
+            html_content = str(ex['HTML_Code']).replace("STUDENT_ID_HERE", str(u['ID'])).replace("STUDENT_NAME_HERE", str(u['Name']))
+            st.components.v1.html(html_content, height=850, scrolling=True)
+            if st.button("Exit"): st.session_state.exam = None; st.rerun()
 
+    else:
+        st.title(f"Welcome, {u['Name']} 👋")
+        tab1, tab2, tab3 = st.tabs(["📋 Pending", "✅ Grades", "📊 Performance"])
+
+        with tab1:
+            # عرض الاختبارات المتاحة
+            required = df_ex_stu[(df_ex_stu['Status'] == 'Active') & (df_ex_stu['Section'].str.contains(str(u['Section']), na=False))]
+            taken_ids = my_grades['Exam_ID'].unique().tolist()
+            required = required[~required['Exam_ID'].astype(str).isin(map(str, taken_ids))]
+            
+            for _, ex_row in required.iterrows():
+                st.markdown(f'<div class="exam-card"><b>{ex_row["Title"]}</b></div>', unsafe_allow_html=True)
+                if st.button(f"Start Exam", key=ex_row['Exam_ID']):
+                    st.session_state.exam = ex_row.to_dict()
+                    st.session_state.start_t = time.time(); st.rerun()
+
+        with tab2:
+            st.subheader("Your Grades")
+            st.table(my_grades[['Exam_ID', 'Score']])
+            
+            st.divider()
+            st.subheader("💡 Smart Practice")
+            # الزر الموحد لإنشاء التدريب
+            if st.button("Generate Similar Practice / تدرب على أفكار مشابهة"):
+                if not df_ex_stu.empty and not my_grades.empty:
+                    last_id = my_grades.iloc[-1]['Exam_ID']
+                    template = df_ex_stu[df_ex_stu['Exam_ID'] == last_id].iloc[0]['HTML_Code']
+                    
+                    # توليد أرقام عشوائية
+                    a, b = random.randint(2, 10), random.randint(1, 8)
+                    
+                    # استبدال المتغيرات في القالب
+                    rendered = str(template).replace("VAR_A", str(a)).replace("VAR_B", str(b))
+                    rendered = rendered.replace("STUDENT_NAME_HERE", "Practice Mode").replace("STUDENT_ID_HERE", "---")
+                    
+                    st.session_state.practice_mode = rendered
+                    st.rerun()
+
+            if 'practice_mode' in st.session_state:
+                st.info("Dynamic Practice Mode Active")
+                st.components.v1.html(st.session_state.practice_mode, height=800, scrolling=True)
+                if st.button("Close Practice"): del st.session_state.practice_mode; st.rerun()
     # --- PART 2: Main Dashboard ---
     else:
         st.title(f"Welcome, {u['Name']} 👋")
