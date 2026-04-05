@@ -100,7 +100,7 @@ elif st.session_state.role == 'student':
             st.info(f"Exam: {r['Title']}")
             # رابط الـ GAS (استبدل بالرابط الخاص بك)
             gas_url = "https://nifham-pro.streamlit.app/"
-            link = f"https://script.google.com/macros/s/AKfycbxvSS3YRa4_u7aH4_OiNJ9jCjiEMFDPo3MqYj1JC0KWQMISJQwdJoY3FwqMFyxzN5yXiQ/exec"
+            link = f"https://script.google.com/macros/s/AKfycbw8kc3OQ_D5F7U1drhVCpPl9Q9OwJ-d-Iz375_JLZhDkQf8AFxiZ_rseLot-LqBYElX/exec"
             st.markdown(f'<a href="{link}" target="_blank" style="text-decoration:none;"><button style="background:#28a745; color:white; border:none; padding:10px; border-radius:5px; width:100%;">Start Exam</button></a>', unsafe_allow_html=True)
 
     with t2:
