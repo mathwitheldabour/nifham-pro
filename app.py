@@ -90,7 +90,7 @@ elif st.session_state.role == 'student':
                 st.markdown(f'<div class="exam-card"><b>{row["Title"]}</b></div>', unsafe_allow_html=True)
                 
                 # الرابط السحري (ضع رابط الـ GAS الخاص بك هنا)
-                gas_url = "https://script.google.com/macros/s/XXXXX/exec"
+                gas_url = "https://script.google.com/macros/s/AKfycbyMKBrYvoCLk7vWqnE3h8Nyg-tgx2mIWhDTkVHV6CgdFEHC3u-EbZkDaM5fh_WjFIuO/exec"
                 full_link = f"{gas_url}?sid={u['ID']}&eid={row['Exam_ID']}&name={u['Name']}"
                 
                 st.markdown(f'<a href="{full_link}" target="_blank" style="text-decoration:none;"><button style="background:#28a745; color:white; border:none; padding:10px 20px; border-radius:5px; cursor:pointer;">Start Exam / ابدأ الاختبار</button></a>', unsafe_allow_html=True)
