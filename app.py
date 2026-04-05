@@ -97,7 +97,7 @@ elif st.session_state.role == 'student':
             if st_t <= now <= en_t:
                 st.info(f"Exam: {r['Title']} | Deadline: {en_t.strftime('%H:%M')}")
                 # استبدل الرابط برابط الـ GAS الخاص بك
-                gas_url = "https://script.google.com/macros/s/AKfycbyb3GEyft91SYG1fJCL9yNFfX6LPbxuO_i0KkUNR4xrCW937vCoIwa2a2iJ6SH7ozP-/exec"
+                gas_url = "https://script.google.com/macros/s/AKfycbylUWgKoKqdM4MUtkm7TN5OYD9uUEZc0MzS6Im7rd9YifqiJiFIb8ByPzgnjwQYeE49/exec"
                 full_link = f"{gas_url}?sid={u['ID']}&eid={r['Exam_ID']}&name={u['Name']}"
                 st.markdown(f'<a href="{full_link}" target="_blank" style="text-decoration:none;"><button style="background:#28a745; color:white; border:none; padding:15px; border-radius:10px; cursor:pointer; width:100%;">Start Exam</button></a>', unsafe_allow_html=True)
 
