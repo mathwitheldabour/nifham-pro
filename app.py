@@ -1,103 +1,104 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import time
-from datetime import datetime
 import plotly.express as px
-import random
+from datetime import datetime
+import time, random
 
-# الإعدادات الأساسية
 st.set_page_config(page_title="NIFHAM Pro", layout="wide")
 PASSING_SCORE = 50
 
-# التنسيق البصري
-st.markdown("""
-    <style>
-    .arabic-sub { direction: rtl; text-align: right; color: #6c757d; font-size: 0.9em; display: block; }
-    .exam-card { background: white; padding: 20px; border-radius: 12px; border-left: 5px solid #007bff; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-    </style>
-    """, unsafe_allow_html=True)
-
-# الاتصال بالبيانات
+# --- الاتصال بالبيانات ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def load_sheet(name):
-    return conn.read(worksheet=name, ttl=0)
+def get_data(name): return conn.read(worksheet=name, ttl=0)
 
-def clean_data(df):
+def clean(df):
     if df.empty: return df
     cols = ['ID', 'Password', 'Section', 'Student_ID', 'Exam_ID', 'Section_Name']
-    for col in cols:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip().str.replace('.0', '', regex=False)
-    if 'Score' in df.columns:
-        df['Score'] = pd.to_numeric(df['Score'], errors='coerce').fillna(0)
+    for c in cols:
+        if c in df.columns: df[c] = df[c].astype(str).str.strip().str.replace('.0', '', regex=False)
+    if 'Score' in df.columns: df['Score'] = pd.to_numeric(df['Score'], errors='coerce').fillna(0)
     return df
 
-# إدارة الجلسة
-if 'auth' not in st.session_state:
-    st.session_state.update({'auth': False, 'user': None, 'role': None})
+if 'auth' not in st.session_state: st.session_state.update({'auth': False, 'user': None, 'role': None})
 
-# --- منطق الدخول ---
+# --- تسجيل الدخول ---
 if not st.session_state.auth:
     st.title("🚀 NIFHAM Math Platform")
-    role = st.selectbox("Login as", ["Student", "Teacher"])
+    role_choice = st.selectbox("Login as", ["Student", "Teacher"])
     with st.form("login"):
-        u_id = st.text_input("User ID")
-        u_pw = st.text_input("Password", type="password")
+        uid, upw = st.text_input("User ID"), st.text_input("Password", type="password")
         if st.form_submit_button("Sign In"):
-            sheet = "Students" if role == "Student" else "Users"
-            df_u = clean_data(load_sheet(sheet))
-            match = df_u[(df_u['ID'] == u_id) & (df_u['Password'] == u_pw)]
+            df_u = clean(get_data("Students" if role_choice=="Student" else "Users"))
+            match = df_u[(df_u['ID'] == uid) & (df_u['Password'] == upw)]
             if not match.empty:
-                u_data = match.iloc[0].to_dict()
-                st.session_state.update({'auth': True, 'user': u_data, 'role': role.lower()})
+                st.session_state.update({'auth': True, 'user': match.iloc[0].to_dict(), 'role': role_choice.lower()})
                 st.rerun()
-            else: st.error("Wrong ID or Password")
 
-# --- لوحة المعلم ---
+# --- لوحة المعلم المكتملة ---
 elif st.session_state.role == 'teacher':
-    st.sidebar.title(f"Welcome, Mr. Ibrahim")
-    menu = st.sidebar.radio("Menu", ["Matrix", "Settings"])
+    st.sidebar.title("Teacher Dashboard")
+    menu = st.sidebar.radio("Navigation", ["📊 Results Matrix", "📈 Full Analytics", "📝 Exams Manager", "⚙️ Settings"])
     
-    if menu == "Matrix":
-        st.header("Results Matrix")
-        df_grd = clean_data(load_sheet("Grades"))
-        st.dataframe(df_grd, use_container_width=True)
-    
-    elif menu == "Settings":
-        st.header("System Settings")
-        # إضافة شعبة أو طالب هنا
+    df_stu, df_grd, df_exm, df_sec = clean(get_data("Students")), clean(get_data("Grades")), clean(get_data("Exams")), clean(get_data("Sections"))
+    all_sec = sorted(df_sec['Section_Name'].unique().tolist()) if not df_sec.empty else []
 
-# --- لوحة الطالب ---
+    if menu == "📊 Results Matrix":
+        st.header("Results Matrix")
+        sel = st.selectbox("Section", ["All"] + all_sec)
+        f_stu = df_stu[df_stu['Section'] == sel] if sel != "All" else df_stu
+        merged = pd.merge(f_stu[['ID', 'Name']], df_grd, left_on='ID', right_on='Student_ID', how='left')
+        if not merged['Exam_ID'].dropna().empty:
+            matrix = merged.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
+            st.dataframe(matrix, use_container_width=True)
+
+    elif menu == "📈 Full Analytics":
+        st.header("Analytics Dashboard")
+        if not df_grd.empty:
+            df_an = pd.merge(df_grd, df_stu, left_on='Student_ID', right_on='ID')
+            c1, c2 = st.columns(2)
+            c1.metric("Global Average", f"{df_grd['Score'].mean():.1f}%")
+            c2.plotly_chart(px.bar(df_an.groupby('Section')['Score'].mean().reset_index(), x='Section', y='Score', title="Avg by Section"))
+
+    elif menu == "📝 Exams Manager":
+        st.header("Exams Scheduler")
+        with st.form("new_ex"):
+            eid, etitle = st.text_input("Exam ID"), st.text_input("Title")
+            col1, col2 = st.columns(2)
+            with col1: sd, stm = st.date_input("Start Date"), st.time_input("Start Time")
+            with col2: ed, etm = st.date_input("End Date"), st.time_input("End Time")
+            ese = st.multiselect("Sections", all_sec)
+            if st.form_submit_button("Publish Exam"):
+                new_row = pd.DataFrame([{"Exam_ID": eid, "Title": etitle, "Section": ",".join(ese), "Status": "Active", "Start_Time": f"{sd} {stm}", "End_Time": f"{ed} {etm}"}])
+                conn.update(worksheet="Exams", data=pd.concat([df_exm, new_row], ignore_index=True))
+                st.success("Published!"); st.rerun()
+
+# --- لوحة الطالب المكتملة ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    df_ex = clean_data(load_sheet("Exams"))
-    df_gr = clean_data(load_sheet("Grades"))
+    df_ex, df_gr = clean(get_data("Exams")), clean(get_data("Grades"))
     my_taken = df_gr[df_gr['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist()
-
-    st.title(f"Hello, {u['Name']} 👋")
-    tab1, tab2 = st.tabs(["📋 Assignments", "✅ Results"])
-
+    
+    st.title(f"Welcome, {u['Name']} 👋")
+    tab1, tab2 = st.tabs(["📋 Assigned Exams", "✅ History"])
+    
     with tab1:
-        st.subheader("Pending Exams")
         now = datetime.now()
         req = df_ex[(df_ex['Status'] == 'Active') & (df_ex['Section'].str.contains(str(u['Section']), na=False))]
         pending = req[~req['Exam_ID'].astype(str).isin(map(str, my_taken))]
+        
+        for _, r in pending.iterrows():
+            try:
+                st_t = datetime.strptime(str(r['Start_Time']), '%Y-%m-%d %H:%M:%S')
+                en_t = datetime.strptime(str(r['End_Time']), '%Y-%m-%d %H:%M:%S')
+            except: st_t = en_t = now
+            
+            if st_t <= now <= en_t:
+                st.info(f"Exam: {r['Title']} | Deadline: {en_t.strftime('%H:%M')}")
+                # استبدل الرابط برابط الـ GAS الخاص بك
+                gas_url = "https://script.google.com/macros/s/AKfycbyb3GEyft91SYG1fJCL9yNFfX6LPbxuO_i0KkUNR4xrCW937vCoIwa2a2iJ6SH7ozP-/exec"
+                full_link = f"{gas_url}?sid={u['ID']}&eid={r['Exam_ID']}&name={u['Name']}"
+                st.markdown(f'<a href="{full_link}" target="_blank" style="text-decoration:none;"><button style="background:#28a745; color:white; border:none; padding:15px; border-radius:10px; cursor:pointer; width:100%;">Start Exam</button></a>', unsafe_allow_html=True)
 
-        for _, row in pending.iterrows():
-            with st.container():
-                st.markdown(f'<div class="exam-card"><b>{row["Title"]}</b></div>', unsafe_allow_html=True)
-                
-                # الرابط السحري (ضع رابط الـ GAS الخاص بك هنا)
-                gas_url = "https://script.google.com/macros/s/AKfycbyMKBrYvoCLk7vWqnE3h8Nyg-tgx2mIWhDTkVHV6CgdFEHC3u-EbZkDaM5fh_WjFIuO/exec"
-                full_link = f"{gas_url}?sid={u['ID']}&eid={row['Exam_ID']}&name={u['Name']}"
-                
-                st.markdown(f'<a href="{full_link}" target="_blank" style="text-decoration:none;"><button style="background:#28a745; color:white; border:none; padding:10px 20px; border-radius:5px; cursor:pointer;">Start Exam / ابدأ الاختبار</button></a>', unsafe_allow_html=True)
-
-    with tab2:
-        st.subheader("Your Scores")
-        st.table(my_taken)
-
-if st.sidebar.button("Logout"):
-    st.session_state.update({'auth': False}); st.rerun()
+if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
