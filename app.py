@@ -4,21 +4,11 @@ import pandas as pd
 from datetime import datetime
 import time, random
 
-# --- 1. الإعدادات الأساسية ---
-st.set_page_config(page_title="NIFHAM Pro | Mr. Ibrahim Eldabour", layout="wide")
+# --- Basic Config ---
+st.set_page_config(page_title="NIFHAM Pro", layout="wide")
+GAS_URL = "https://script.google.com/macros/s/AKfycbxnlYY1v1OY15rMBmkKECGfeTjfujDd3JpcoP6PD4HoFBNjfWa9RDslDB97kwNVPdFkJg/exec"
 
-# الرابط الخاص بك (تأكد أنه ينتهي بـ /exec)
-GAS_URL = "https://script.google.com/macros/s/AKfycbzZvxhGjYN-nOm8Fgz1IZUAJJyjlwYu8sOtDXqU--P_Sohb7qT-mjSr5WLgICGMYLYYlA/exec"
-
-# التنسيق (CSS)
-st.markdown("""
-    <style>
-    .arabic-sub { direction: rtl; text-align: right; color: #6c757d; font-size: 0.9em; display: block; margin-bottom: 10px; }
-    .exam-card { background: white; padding: 20px; border-radius: 12px; border-left: 6px solid #007bff; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 2. محرك البيانات ---
+# --- Data Engine ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_sheet(name):
@@ -28,157 +18,107 @@ def load_sheet(name):
 def clean_data(df):
     if df is None or df.empty: return pd.DataFrame()
     df.columns = [str(c).strip() for c in df.columns]
-    cols_to_fix = ['ID', 'Student_ID', 'Exam_ID', 'Section', 'Password', 'Section_Name']
-    for col in df.columns:
-        if col in cols_to_fix:
-            df[col] = df[col].astype(str).str.strip().str.replace('.0', '', regex=False)
-    if 'Score' in df.columns:
-        df['Score'] = pd.to_numeric(df['Score'], errors='coerce').fillna(0)
+    cols = ['ID', 'Student_ID', 'Exam_ID', 'Section', 'Password', 'Section_Name']
+    for c in cols:
+        if c in df.columns: df[c] = df[c].astype(str).str.strip().str.replace('.0', '', regex=False)
+    if 'Score' in df.columns: df['Score'] = pd.to_numeric(df['Score'], errors='coerce').fillna(0)
     return df
 
-# إدارة الجلسة
-if 'auth' not in st.session_state:
-    st.session_state.update({'auth': False, 'user': None, 'role': None})
+if 'auth' not in st.session_state: st.session_state.update({'auth': False, 'user': None, 'role': None})
 
-# --- 3. نظام تسجيل الدخول ---
+# --- Login System ---
 if not st.session_state.auth:
     st.title("🚀 NIFHAM Math Platform")
-    st.markdown("<span class='arabic-sub'>إدارة منصة الرياضيات | أ. إبراهيم الدبور</span>", unsafe_allow_html=True)
-    role_choice = st.selectbox("تسجيل الدخول كـ", ["Student / طالب", "Teacher / معلم"])
-    with st.form("login_gate"):
-        u_id = st.text_input("User ID").strip()
-        u_pw = st.text_input("Password", type="password").strip()
-        if st.form_submit_button("دخول"):
-            target = "Students" if "Student" in role_choice else "Users"
+    role = st.selectbox("Login as", ["Student", "Teacher"])
+    with st.form("login"):
+        uid, upw = st.text_input("User ID").strip(), st.text_input("Password", type="password").strip()
+        if st.form_submit_button("Sign In"):
+            target = "Students" if role == "Student" else "Users"
             df_u = clean_data(load_sheet(target))
-            match = df_u[(df_u['ID'] == u_id) & (df_u['Password'] == u_pw)]
+            match = df_u[(df_u['ID'] == uid) & (df_u['Password'] == upw)]
             if not match.empty:
-                st.session_state.update({'auth': True, 'user': match.iloc[0].to_dict(), 'role': 'student' if "Student" in role_choice else 'teacher'})
+                st.session_state.update({'auth': True, 'user': match.iloc[0].to_dict(), 'role': role.lower()})
                 st.rerun()
-            else: st.error("Wrong ID or Password!")
 
-# --- 4. لوحة المعلم (Teacher Dashboard) ---
+# --- Teacher Dashboard (English Sidebar) ---
 elif st.session_state.role == 'teacher':
     st.sidebar.title("Mr. Ibrahim Eldabour")
-    menu = st.sidebar.radio("القائمة الرئيسية", ["📊 مصفوفة الدرجات", "👤 نتائج الطلاب الفردية", "📚 مكتبة المعاينة", "📝 مدير الاختبارات", "⚙️ الإعدادات"])
-
-    # تحميل البيانات
+    menu = st.sidebar.radio("Navigation", ["Results Matrix", "Student Performance", "Exams Library", "Exams Manager", "System Settings"])
+    
     df_stu = clean_data(load_sheet("Students"))
     df_grd = clean_data(load_sheet("Grades"))
     df_exm = clean_data(load_sheet("Exams"))
     df_sec = clean_data(load_sheet("Sections"))
-    active_sections = sorted(df_sec['Section_Name'].unique().tolist()) if not df_sec.empty else []
+    active_secs = sorted(df_sec['Section_Name'].unique().tolist()) if not df_sec.empty else []
 
-    # أ- مصفوفة الدرجات
-    if menu == "📊 مصفوفة الدرجات":
-        st.header("Results Matrix / مصفوفة الدرجات")
-        if not active_sections: st.warning("قم بإضافة شعب أولاً من الإعدادات.")
-        else:
-            sel_sec = st.selectbox("اختر الشعبة", ["All"] + active_sections)
-            f_stu = df_stu[df_stu['Section'] == sel_sec] if sel_sec != "All" else df_stu
-            if 'Student_ID' in df_grd.columns:
-                merged = pd.merge(f_stu[['ID', 'Name']], df_grd, left_on='ID', right_on='Student_ID', how='left')
-                if 'Exam_ID' in merged.columns:
-                    matrix = merged.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
-                    st.dataframe(matrix, use_container_width=True)
-                else: st.info("لا توجد اختبارات مسجلة لهذه الشعبة.")
+    if menu == "Results Matrix":
+        st.header("Class Results Matrix")
+        sec = st.selectbox("Select Section", ["All"] + active_secs)
+        f_stu = df_stu[df_stu['Section'] == sec] if sec != "All" else df_stu
+        if 'Student_ID' in df_grd.columns:
+            m = pd.merge(f_stu[['ID', 'Name']], df_grd, left_on='ID', right_on='Student_ID', how='left')
+            if 'Exam_ID' in m.columns:
+                st.dataframe(m.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-'), use_container_width=True)
 
-    # ب- النتائج الفردية (حل مشكلة KeyError)
-    elif menu == "👤 نتائج الطلاب الفردية":
+    elif menu == "Student Performance":
         st.header("Individual Student Report")
-        s_sec = st.selectbox("اختر الشعبة", ["Select Section"] + active_sections)
-        
-        if s_sec != "Select Section":
-            students_in_sec = df_stu[df_stu['Section'] == s_sec]['Name'].tolist()
-            if students_in_sec:
-                s_name = st.selectbox("اختر اسم الطالب", students_in_sec)
-                student_id = df_stu[df_stu['Name'] == s_name]['ID'].values[0]
-                personal_grd = df_grd[df_grd['Student_ID'] == str(student_id)]
-                if not personal_grd.empty:
-                    st.subheader(f"سجل درجات: {s_name}")
-                    st.table(personal_grd[['Date', 'Exam_ID', 'Score']])
-                else: st.info("هذا الطالب لم يقم بأداء أي اختبارات.")
-            else: st.warning("لا يوجد طلاب مسجلين في هذه الشعبة.")
+        s_sec = st.selectbox("Section", ["Select"] + active_secs)
+        if s_sec != "Select":
+            names = df_stu[df_stu['Section'] == s_sec]['Name'].tolist()
+            name = st.selectbox("Student Name", names)
+            sid = df_stu[df_stu['Name'] == name]['ID'].values[0]
+            st.table(df_grd[df_grd['Student_ID'] == str(sid)])
 
-    # ج- مكتبة المعاينة
-    elif menu == "📚 مكتبة المعاينة":
-        st.header("Exams Library / معاينة الاختبارات")
-        if df_exm.empty: st.info("لا توجد اختبارات منشورة.")
-        else:
-            for _, row in df_exm.iterrows():
-                with st.expander(f"📖 {row['Title']} (Code: {row['Exam_ID']})"):
-                    st.write(f"**الشعب المستهدفة:** {row['Section']}")
-                    preview_url = f"{GAS_URL}?sid=TEACHER&eid={row['Exam_ID']}&name=Mr_Ibrahim&mode=preview"
-                    st.link_button("معاينة الاختبار 👁️", preview_url)
+    elif menu == "Exams Library":
+        st.header("Exams Library (Preview)")
+        for _, r in df_exm.iterrows():
+            with st.expander(f"📖 {r['Title']} ({r['Exam_ID']})"):
+                st.link_button("Preview Exam", f"{GAS_URL}?sid=TEACHER&eid={r['Exam_ID']}&name=Mr_Ibrahim&mode=preview")
 
-    # د- مدير الاختبارات (إضافة التاريخ والزمن)
-    elif menu == "📝 مدير الاختبارات":
-        st.header("Exams Manager / إضافة اختبار جديد")
-        with st.form("exam_creation"):
-            eid = st.text_input("كود الاختبار (Exam ID)")
-            etitle = st.text_input("عنوان الاختبار")
-            col1, col2 = st.columns(2)
-            with col1: sd = st.date_input("تاريخ البدء"); stm = st.time_input("ساعة البدء")
-            with col2: ed = st.date_input("تاريخ الانتهاء"); etm = st.time_input("ساعة الانتهاء")
-            esections = st.multiselect("تخصيص للشعب", active_sections)
-            ehtml = st.text_area("كود الـ HTML الخاص بالسؤال (العمود H)")
-            if st.form_submit_button("نشر الاختبار 🚀"):
-                if eid and esections:
-                    new_ex = pd.DataFrame([{"Exam_ID": eid, "Title": etitle, "Section": ",".join(esections), "Status": "Active", "Start_Time": f"{sd} {stm}", "End_Time": f"{ed} {etm}", "HTML_Code": ehtml}])
-                    conn.update(worksheet="Exams", data=pd.concat([df_exm, new_ex], ignore_index=True))
-                    st.success("تم نشر الاختبار بنجاح!"); st.rerun()
+    elif menu == "Exams Manager":
+        st.header("Exams Manager")
+        with st.form("ex"):
+            eid, et = st.text_input("Exam ID"), st.text_input("Title")
+            es = st.multiselect("Sections", active_secs)
+            eh = st.text_area("HTML Code (Column H)")
+            if st.form_submit_button("Publish"):
+                conn.update(worksheet="Exams", data=pd.concat([df_exm, pd.DataFrame([{"Exam_ID": eid, "Title": et, "Section": ",".join(es), "HTML_Code": eh}])], ignore_index=True))
+                st.success("Published!"); st.rerun()
 
-    # هـ- الإعدادات (تفعيل إدارة الشعب والطلاب)
-    elif menu == "⚙️ الإعدادات":
-        st.header("Settings / إدارة النظام")
-        tab_sec, tab_stu = st.tabs(["إدارة الشعب", "إضافة طالب جديد"])
-        
-        with tab_sec:
-            new_sec = st.text_input("اسم الشعبة الجديدة (مثل: 12-ADV-A)")
-            if st.button("حفظ الشعبة"):
-                if new_sec:
-                    conn.update(worksheet="Sections", data=pd.concat([df_sec, pd.DataFrame([{"Section_Name": new_sec.strip()}])], ignore_index=True))
-                    st.success("تمت إضافة الشعبة!"); st.rerun()
-        
-        with tab_stu:
-            with st.form("new_student"):
-                sn = st.text_input("اسم الطالب الرباعي")
-                si = st.text_input("رقم الهوية / ID")
-                ss = st.selectbox("الشعبة", active_sections)
-                sp = st.text_input("كلمة المرور", value=str(random.randint(1000, 9999)))
-                if st.form_submit_button("تسجيل الطالب"):
-                    if sn and si:
-                        conn.update(worksheet="Students", data=pd.concat([df_stu, pd.DataFrame([{"ID": si, "Name": sn, "Password": sp, "Section": ss}])], ignore_index=True))
-                        st.success("تم تسجيل الطالب!"); st.rerun()
+    elif menu == "System Settings":
+        st.header("System Settings")
+        c1, c2 = st.tabs(["Sections", "Register Students"])
+        with c1:
+            ns = st.text_input("New Section Name")
+            if st.button("Save Section"):
+                conn.update(worksheet="Sections", data=pd.concat([df_sec, pd.DataFrame([{"Section_Name": ns}])], ignore_index=True))
+                st.rerun()
+        with c2:
+            with st.form("stu"):
+                sn, si, ss = st.text_input("Student Name"), st.text_input("ID"), st.selectbox("Section", active_secs)
+                if st.form_submit_button("Register"):
+                    conn.update(worksheet="Students", data=pd.concat([df_stu, pd.DataFrame([{"ID": si, "Name": sn, "Section": ss, "Password": str(random.randint(1000, 9999))}])], ignore_index=True))
+                    st.rerun()
 
-# --- 5. لوحة الطالب ---
+# --- Student Dashboard ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    df_ex = clean_data(load_sheet("Exams"))
-    df_gr = clean_data(load_sheet("Grades"))
-    my_subs = df_gr[df_gr['Student_ID'] == str(u['ID'])] if 'Student_ID' in df_gr.columns else pd.DataFrame()
-    taken_ids = my_subs['Exam_ID'].unique().tolist() if not my_subs.empty else []
+    df_ex, df_gr = clean_data(load_sheet("Exams")), clean_data(load_sheet("Grades"))
+    taken = df_gr[df_gr['Student_ID'] == str(u['ID'])]['Exam_ID'].unique().tolist() if 'Student_ID' in df_gr.columns else []
 
-    st.title(f"أهلاً {u['Name']} 👋")
-    st.markdown(f"<span class='arabic-sub'>شعبة: {u['Section']}</span>", unsafe_allow_html=True)
-    t1, t2 = st.tabs(["📋 الاختبارات المطلوبة", "✅ مراجعة إنجازاتي"])
-
+    st.title(f"Welcome, {u['Name']} 👋")
+    t1, t2 = st.tabs(["📋 My Assignments", "✅ My Results"])
     with t1:
-        now = datetime.now()
-        pending = df_ex[~df_ex['Exam_ID'].astype(str).isin(map(str, taken_ids))]
-        for _, row in pending.iterrows():
-            if str(u['Section']) in str(row['Section']):
-                with st.container():
-                    st.markdown(f'<div class="exam-card"><b>{row["Title"]}</b></div>', unsafe_allow_html=True)
-                    exam_url = f"{GAS_URL}?sid={u['ID']}&eid={row['Exam_ID']}&name={u['Name']}&mode=exam"
-                    st.link_button("ابدأ الاختبار الآن", exam_url)
-
+        pend = df_ex[~df_ex['Exam_ID'].astype(str).isin(map(str, taken))]
+        for _, r in pend.iterrows():
+            if str(u['Section']) in str(r['Section']):
+                st.info(f"Exam: {r['Title']}")
+                st.link_button("Start Exam", f"{GAS_URL}?sid={u['ID']}&eid={r['Exam_ID']}&name={u['Name']}&mode=exam")
     with t2:
-        if not my_subs.empty:
-            for _, sub in my_subs.iterrows():
-                st.write(f"✅ اختبار: **{sub['Exam_ID']}** | درجتك: **{sub['Score']}%**")
-                rev_url = f"{GAS_URL}?sid={u['ID']}&eid={sub['Exam_ID']}&name={u['Name']}&mode=review"
-                st.link_button("مراجعة الإجابات", rev_url)
+        if 'Student_ID' in df_gr.columns:
+            my_gr = df_gr[df_gr['Student_ID'] == str(u['ID'])]
+            for _, s in my_gr.iterrows():
+                st.write(f"✅ {s['Exam_ID']} | Score: {s['Score']}%")
+                st.link_button("Review", f"{GAS_URL}?sid={u['ID']}&eid={s['Exam_ID']}&name={u['Name']}&mode=review")
 
-if st.sidebar.button("تسجيل الخروج"):
-    st.session_state.update({'auth': False, 'user': None, 'role': None}); st.rerun()
+if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
