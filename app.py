@@ -3,22 +3,16 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 import plotly.express as px
-import time
-import random
+import time, random
 
-# --- 1. الإعدادات وتنسيق الواجهة ---
-st.set_page_config(page_title="NIFHAM Pro | Math Platform", layout="wide")
+# --- 1. الثوابت والإعدادات (حل مشكلة NameError) ---
+st.set_page_config(page_title="NIFHAM Pro", layout="wide")
+PASSING_SCORE = 50  # تعريف المتغير عالمياً
 
+# ضع رابط الـ Web App الصحيح هنا (تأكد أنه ينتهي بـ /exec)
 GAS_URL = "https://script.google.com/macros/s/AKfycbzZvxhGjYN-nOm8Fgz1IZUAJJyjlwYu8sOtDXqU--P_Sohb7qT-mjSr5WLgICGMYLYYlA/exec"
 
-st.markdown("""
-    <style>
-    .arabic-sub { direction: rtl; text-align: right; color: #6c757d; font-size: 0.85em; display: block; margin-bottom: 10px; }
-    .exam-card { background: white; padding: 20px; border-radius: 12px; border-left: 5px solid #007bff; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 2. محرك البيانات (المعدل لحل الـ KeyError) ---
+# --- 2. محرك البيانات المؤمن ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_sheet(name):
@@ -27,16 +21,13 @@ def load_sheet(name):
 
 def clean_data(df):
     if df is None or df.empty: return pd.DataFrame()
-    
-    # السر هنا: تنظيف أسماء الأعمدة نفسها من أي مسافات زائدة
+    # تنظيف أسماء الأعمدة (حل مشكلة KeyError)
     df.columns = [str(c).strip() for c in df.columns]
-    
-    # تنظيف محتوى الأعمدة
+    # تنظيف المحتوى
     cols_to_fix = ['ID', 'Student_ID', 'Exam_ID', 'Section', 'Password']
     for col in df.columns:
         if col in cols_to_fix:
             df[col] = df[col].astype(str).str.strip().str.replace('.0', '', regex=False)
-    
     if 'Score' in df.columns:
         df['Score'] = pd.to_numeric(df['Score'], errors='coerce').fillna(0)
     return df
@@ -45,104 +36,80 @@ def clean_data(df):
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'user': None, 'role': None})
 
-# --- 4. نظام الدخول ---
+# --- 4. نظام تسجيل الدخول ---
 if not st.session_state.auth:
     st.title("🚀 NIFHAM Math Platform")
     role_choice = st.selectbox("Login as", ["Student / طالب", "Teacher / معلم"])
-    with st.form("login_gate"):
-        u_id = st.text_input("User ID").strip()
-        u_pw = st.text_input("Password", type="password").strip()
+    with st.form("login"):
+        uid = st.text_input("ID").strip()
+        upw = st.text_input("Password", type="password").strip()
         if st.form_submit_button("Sign In"):
             target = "Students" if "Student" in role_choice else "Users"
             df_u = clean_data(load_sheet(target))
-            match = df_u[(df_u['ID'] == u_id) & (df_u['Password'] == u_pw)]
+            match = df_u[(df_u['ID'] == uid) & (df_u['Password'] == upw)]
             if not match.empty:
                 st.session_state.update({'auth': True, 'user': match.iloc[0].to_dict(), 'role': 'student' if "Student" in role_choice else 'teacher'})
                 st.rerun()
-            else: st.error("Wrong ID or Password")
+            else: st.error("Invalid Credentials")
 
-# --- 5. لوحة المعلم ---
+# --- 5. لوحة المعلم المحدثة ---
 elif st.session_state.role == 'teacher':
     st.sidebar.title("Mr. Ibrahim Eldabour")
-    menu = st.sidebar.radio("Navigation", ["📊 Results Matrix", "📚 Exams Library", "📝 Exams Manager"])
+    menu = st.sidebar.radio("Navigation", ["📊 Matrix", "📈 Analytics", "📚 Library", "📝 Manager"])
     
+    # تحميل البيانات فوراً
     df_stu = clean_data(load_sheet("Students"))
     df_grd = clean_data(load_sheet("Grades"))
     df_exm = clean_data(load_sheet("Exams"))
 
-    if menu == "📊 Results Matrix":
+    if menu == "📚 Library":
+        st.header("Exams Library")
+        for _, row in df_exm.iterrows():
+            with st.expander(f"📖 {row['Title']}"):
+                # المعاينة تفتح في نافذة جديدة تماماً لتجنب مشاكل جوجل درايف
+                p_url = f"{GAS_URL}?sid=TEACHER&eid={row['Exam_ID']}&name=Mr_Ibrahim&mode=preview"
+                st.link_button("👁️ Open Preview / معاينة الاختبار", p_url)
+
+    elif menu == "📈 Analytics":
+        st.header("Analytics")
+        if not df_grd.empty:
+            st.metric("Avg Score", f"{df_grd['Score'].mean():.1f}%")
+            # حل مشكلة الـ NameError في نسبة النجاح
+            pass_rate = (df_grd['Score'] >= PASSING_SCORE).mean() * 100
+            st.metric("Pass Rate", f"{pass_rate:.1f}%")
+            st.bar_chart(df_grd.set_index('Exam_ID')['Score'])
+
+    elif menu == "📊 Matrix":
         st.header("Results Matrix")
-        st.dataframe(df_grd, use_container_width=True)
+        if 'Student_ID' in df_grd.columns and not df_stu.empty:
+            merged = pd.merge(df_stu[['ID', 'Name']], df_grd, left_on='ID', right_on='Student_ID', how='left')
+            if 'Exam_ID' in merged.columns:
+                matrix = merged.pivot_table(index='Name', columns='Exam_ID', values='Score', aggfunc='max').fillna('-')
+                st.dataframe(matrix, use_container_width=True)
+        else: st.info("No data yet.")
 
-# --- قسم مكتبة الاختبارات في app.py ---
-    elif menu == "📚 Exams Library":
-        st.header("Exams Library / مكتبة الاختبارات")
-        st.markdown("<span class='arabic-sub'>معاينة الاختبارات لطلاب الصف الثاني عشر المتقدم</span>", unsafe_allow_html=True)
-        
-        if df_exm.empty:
-            st.info("No exams found.")
-        else:
-            for _, row in df_exm.iterrows():
-                with st.expander(f"📖 {row['Title']} (ID: {row['Exam_ID']})"):
-                    col_info, col_btn = st.columns([3, 1])
-                    col_info.write(f"**Section:** {row['Section']} | **Status:** {row['Status']}")
-                    
-                    # تجهيز رابط المعاينة (Preview)
-                    # تأكد إن GAS_URL هو الرابط اللي بينتهي بـ /exec
-                    preview_url = f"{GAS_URL}?sid=TEACHER&eid={row['Exam_ID']}&name=Mr_Ibrahim&mode=preview"
-                    
-                    # الاستخدام الصحيح لزر الرابط لفتح نافذة جديدة
-                    with col_btn:
-                        st.link_button("👁️ Preview / معاينة", preview_url, type="primary")
+    if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
 
-    elif menu == "📝 Exams Manager":
-        st.header("Exams Manager")
-        with st.form("new_ex"):
-            eid = st.text_input("Exam ID")
-            etitle = st.text_input("Title")
-            esec = st.text_input("Section (e.g., 12A)")
-            if st.form_submit_button("Publish"):
-                new_row = pd.DataFrame([{"Exam_ID": eid, "Title": etitle, "Section": esec, "Status": "Active"}])
-                conn.update(worksheet="Exams", data=pd.concat([df_exm, new_row], ignore_index=True))
-                st.success("Published!"); st.rerun()
-
-# --- 6. لوحة الطالب (تم إصلاح خطأ الـ Student_ID هنا) ---
+# --- 6. لوحة الطالب ---
 elif st.session_state.role == 'student':
     u = st.session_state.user
-    df_ex_stu = clean_data(load_sheet("Exams"))
-    df_gr_stu = clean_data(load_sheet("Grades"))
+    df_ex = clean_data(load_sheet("Exams"))
+    df_gr = clean_data(load_sheet("Grades"))
     
-    # فحص أمان: هل عمود Student_ID موجود فعلاً؟
-    if not df_gr_stu.empty and 'Student_ID' in df_gr_stu.columns:
-        my_subs = df_gr_stu[df_gr_stu['Student_ID'] == str(u['ID'])]
-    else:
-        my_subs = pd.DataFrame(columns=['Exam_ID', 'Score']) # شيت فاضي لو مفيش درجات
-
+    my_subs = df_gr[df_gr['Student_ID'] == str(u['ID'])] if 'Student_ID' in df_gr.columns else pd.DataFrame()
     taken_ids = my_subs['Exam_ID'].unique().tolist() if not my_subs.empty else []
 
     st.title(f"Welcome, {u['Name']} 👋")
-    tab1, tab2 = st.tabs(["📋 Assignments", "✅ History"])
+    t1, t2 = st.tabs(["📋 Assignments", "✅ History"])
 
-    with tab1:
-        st.subheader("Pending Exams")
-        # فلترة ذكية للاختبارات الخاصة بشعبة الطالب
-        pending = df_ex_stu[~df_ex_stu['Exam_ID'].astype(str).isin(map(str, taken_ids))]
-        
+    with t1:
+        pending = df_ex[~df_ex['Exam_ID'].astype(str).isin(map(str, taken_ids))]
         for _, row in pending.iterrows():
             if str(u['Section']) in str(row['Section']):
-                with st.container():
-                    st.markdown(f'<div class="exam-card"><b>{row["Title"]}</b></div>', unsafe_allow_html=True)
-                    exam_url = f"{GAS_URL}?sid={u['ID']}&eid={row['Exam_ID']}&name={u['Name']}&mode=exam"
-                    st.markdown(f'<a href="{exam_url}" target="_blank"><button style="width:100%; background:#28a745; color:white; border:none; padding:10px; border-radius:8px; cursor:pointer;">Start Exam</button></a>', unsafe_allow_html=True)
+                st.info(f"Exam: {row['Title']}")
+                ex_url = f"{GAS_URL}?sid={u['ID']}&eid={row['Exam_ID']}&name={u['Name']}&mode=exam"
+                st.link_button("Start Exam / ابدأ الاختبار", ex_url)
 
-    with tab2:
-        st.subheader("Your Submission History")
+    with t2:
         if not my_subs.empty:
-            for _, sub in my_subs.iterrows():
-                st.write(f"✅ Exam: **{sub['Exam_ID']}** | Score: **{sub['Score']}%**")
-                review_url = f"{GAS_URL}?sid={u['ID']}&eid={sub['Exam_ID']}&name={u['Name']}&mode=review"
-                st.markdown(f'<a href="{review_url}" target="_blank">Review Answers</a>', unsafe_allow_html=True)
-        else:
-            st.info("No completed exams yet.")
-
-if st.sidebar.button("Logout"): st.session_state.update({'auth': False}); st.rerun()
+            st.dataframe(my_subs[['Exam_ID', 'Score']], use_container_width=True)
