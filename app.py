@@ -74,21 +74,26 @@ elif st.session_state.role == 'teacher':
         st.header("Results Matrix")
         st.dataframe(df_grd, use_container_width=True)
 
-# --- داخل قسم Exams Library في app.py ---
+# --- قسم مكتبة الاختبارات في app.py ---
     elif menu == "📚 Exams Library":
         st.header("Exams Library / مكتبة الاختبارات")
+        st.markdown("<span class='arabic-sub'>معاينة الاختبارات لطلاب الصف الثاني عشر المتقدم</span>", unsafe_allow_html=True)
+        
         if df_exm.empty:
             st.info("No exams found.")
         else:
             for _, row in df_exm.iterrows():
                 with st.expander(f"📖 {row['Title']} (ID: {row['Exam_ID']})"):
+                    col_info, col_btn = st.columns([3, 1])
+                    col_info.write(f"**Section:** {row['Section']} | **Status:** {row['Status']}")
+                    
                     # تجهيز رابط المعاينة (Preview)
+                    # تأكد إن GAS_URL هو الرابط اللي بينتهي بـ /exec
                     preview_url = f"{GAS_URL}?sid=TEACHER&eid={row['Exam_ID']}&name=Mr_Ibrahim&mode=preview"
                     
-                    st.write(f"**Section:** {row['Section']} | **Status:** {row['Status']}")
-                    
-                    # استخدام زر Streamlit لفتح الرابط بشكل احترافي
-                    st.link_button("👁️ Preview Exam / معاينة الاختبار", preview_url)
+                    # الاستخدام الصحيح لزر الرابط لفتح نافذة جديدة
+                    with col_btn:
+                        st.link_button("👁️ Preview / معاينة", preview_url, type="primary")
 
     elif menu == "📝 Exams Manager":
         st.header("Exams Manager")
